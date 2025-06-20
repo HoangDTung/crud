@@ -1,0 +1,5308 @@
+package com.bidv.ftp.jdbc;
+
+import java.io.*;
+import java.util.Date;
+import java.text.*;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.text.DecimalFormat;
+import java.sql.CallableStatement;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Types;
+
+import com.bidv.ftp.resource.DB;
+import com.bidv.ftp.util.Constants;
+import com.bidv.ftp.util.Utils;
+
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.SqlOutParameter;
+import org.springframework.jdbc.core.SqlParameter;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.sql.DataSource;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import org.springframework.jdbc.object.StoredProcedure;
+import org.springframework.jdbc.support.rowset.SqlRowSet;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+import java.util.Random;
+
+import com.bidv.ftp.dao.BaoCaoBM03DAO;
+import com.bidv.ftp.dto.BaoCaoBM03DTO;
+import com.bidv.ftp.dto.BaoCaoBM03_1DTO;
+import com.bidv.ftp.dto.GetDTO;
+
+public class BaoCaoBM03Impl implements BaoCaoBM03DAO {
+
+	public String TimKiem(GetDTO getDTO, String WhereConditon) 
+	{
+		try {
+			String ngay_giao_dich = Utils.getTag(WhereConditon, "<DATE>","</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereConditon, "<CHINHANH>","</CHINHANH>");
+			String user_param = Utils.getTag(WhereConditon, "<USER>", "</USER>");
+			String so_chung_tu_param = Utils.getTag(WhereConditon,"<SOCHUNGTU>", "</SOCHUNGTU>");
+			String tai_khoan_param = Utils.getTag(WhereConditon, "<TAIKHOAN>","</TAIKHOAN>");
+			String ma_tien_te_param = Utils.getTag(WhereConditon, "<MATIENTE>","</MATIENTE>");
+			String trang_thai_param = Utils.getTag(WhereConditon,"<TRANGTHAI>", "</TRANGTHAI>");
+			String phong_ban_param = Utils.getTag(WhereConditon, "<PHONGBAN>","</PHONGBAN>");
+
+			// Ngay giao dich + CN da check null o JSP
+			String where_sql = "";
+			where_sql = "where ngay_bao_cao = to_date(" + "'" + ngay_giao_dich
+					+ "','dd/mm/yyyy')";
+			if (!chi_nhanh_param.contains("000"))
+			{
+				if (chi_nhanh_param.contains("CN"))
+				{
+					where_sql = where_sql + " and TRBR in " 
+					+ "(select BDS_CODE from qltktg_thamso_bds where branch_code like '" + chi_nhanh_param.substring(2) + "%')" ;
+				}
+				else
+				{
+					where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+				};
+			};
+				
+			// user
+			if (user_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and trim(trusrn) = " + "'"
+						+ user_param + "'";
+			}
+			// so chung tu
+			if (so_chung_tu_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and trim(trseq) = " + "'"
+						+ so_chung_tu_param + "'";
+			}
+
+			// tai khoan
+			if (tai_khoan_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and trim(GTACCT) = " + "'"
+						+ tai_khoan_param + "'";
+			}
+			// ma tien te
+			if (ma_tien_te_param.equals("-1")) {
+			} else {
+				where_sql = where_sql + " and trim(TRCTYP) = " + "'"
+						+ ma_tien_te_param + "'";
+			}
+			// trang thai
+			if (trang_thai_param.equals("1") || trang_thai_param.equals("2")) {
+				where_sql = where_sql + " and trang_thai like '"
+						+ trang_thai_param + "%'";
+			} else {
+				where_sql = where_sql
+						+ " and (trang_thai = '1' or trang_thai = 2)";
+			}
+			// phong ban
+			if (phong_ban_param.equals("-1")) {
+			} else {
+				where_sql = where_sql + " and SEGMENT2 = '" + phong_ban_param
+						+ "'";
+			} //phong_ban
+
+			int ipage = Integer.parseInt(getDTO.getPage());
+			int ilimit = Integer.parseInt(getDTO.getLimit());
+			String Start = String.valueOf((ipage - 1) * ilimit + 1);
+			String End = String.valueOf(ipage * ilimit);
+			int count = 0;
+			// mệnh đề where được dùng để phân trang.
+			SqlRowSet rs;
+			int iTotalPage;
+			if (getDTO.getSidx().equals("STT"))
+				getDTO.setSidx("STT");
+			String count_sql = "select count(*) from qltktg_glstrn "
+					+ where_sql;
+			count = DB.jdbcTemplate.queryForInt(count_sql);
+			iTotalPage = count / ilimit;
+			int acCount = iTotalPage * ilimit;
+			if (acCount < count)
+				iTotalPage++;
+
+			String where = " where STT between " + Start + " and " + End;
+
+			String sql = "select * from"
+
+					+ " (select rownum as STT,"
+					+ "TRBR, phong_ban, to_char(ngay_bao_cao, 'dd/mm/yyyy') ngay_bao_cao, "
+
+					+ "TRUSRN, to_char(DATADATE7, 'dd/mm/yyyy') DATADATE7,TRSEQ,GTACCT,SEGMENT2, SEGMENT5,SEGMENT4,SEGMENT6,TRCTYP,TRDORC,TRAMT,TREFTH,ZCHANREFNO,TRREFN,thuyet_minh,trang_thai,to_char(ngay_tat_toan, 'dd/mm/yyyy') ngay_tat_toan,id_dulieu, duyet_bc, user_nhap, user_duyet "
+					+ " from qltktg_glstrn " + where_sql
+					+ " Order by phong_ban, TRUSRN, trang_thai )"
+
+					+ where + " Order by STT";
+
+			rs = DB.jdbcTemplate.queryForRowSet(sql);
+
+			StringBuilder sb = new StringBuilder();
+
+			while (rs.next()) 
+			{
+				String TRBR = Utils.toHTML(rs.getString("TRBR"));
+				String phong_ban = Utils.toHTML(rs.getString("phong_ban"));
+				String ngay_bao_cao = Utils.toHTML(rs.getString("ngay_bao_cao"));
+				String TRUSRN = Utils.toHTML(rs.getString("TRUSRN"));
+				String DATADATE7 = Utils.toHTML(rs.getString("DATADATE7"));
+				String TRSEQ = Utils.toHTML(rs.getString("TRSEQ"));
+				String GTACCT = Utils.toHTML(rs.getString("GTACCT"));
+				String SEGMENT2 = Utils.toHTML(rs.getString("SEGMENT2"));
+				String SEGMENT5 = Utils.toHTML(rs.getString("SEGMENT5"));
+				String SEGMENT4 = Utils.toHTML(rs.getString("SEGMENT4"));
+				
+				String SEGMENT6 = Utils.toHTML(rs.getString("SEGMENT6"));
+				String TRCTYP = Utils.toHTML(rs.getString("TRCTYP"));
+				String TRDORC = Utils.toHTML(rs.getString("TRDORC"));
+				String TRAMT = Utils.toHTML(rs.getString("TRAMT"));
+				//
+				String TREFTH = Utils.toHTML( Utils.checkNull(rs.getString("TREFTH")) );	
+				TREFTH = stripNonValidXMLCharacters(TREFTH);
+				//
+				String ZCHANREFNO = Utils.toHTML(rs.getString("ZCHANREFNO"));
+				String TRREFN = Utils.toHTML(rs.getString("TRREFN"));
+				String thuyet_minh = Utils.toHTML(rs.getString("thuyet_minh"));
+				String trang_thai = Utils.toHTML(rs.getString("trang_thai"));
+				if (trang_thai.equals("1")) {
+					trang_thai = "1-Cho duyet";
+				}
+				if (trang_thai.equals("2")) {
+					trang_thai = "2-Da duyet";
+				}
+				if (trang_thai.equals("3")) {
+					trang_thai = "3-Da xu ly";
+				}
+				String ngay_tat_toan = Utils.toHTML(rs.getString("ngay_tat_toan"));
+      			String id_dulieu = Utils.toHTML(rs.getString("id_dulieu"));
+				String duyet_bc = Utils.toHTML(rs.getString("duyet_bc"));
+				
+				String user_nhap = Utils.toHTML(rs.getString("user_nhap"));
+				String user_duyet = Utils.toHTML(rs.getString("user_duyet"));
+				
+
+				sb.append("<row><cell>");
+				sb.append(TRBR);
+				sb.append("</cell><cell>");
+				sb.append(phong_ban);
+				sb.append("</cell><cell>");
+				sb.append(ngay_bao_cao);
+				sb.append("</cell><cell>");
+				sb.append(TRUSRN);
+				sb.append("</cell><cell>");
+				sb.append(DATADATE7);
+				sb.append("</cell><cell>");
+				sb.append(TRSEQ);
+				sb.append("</cell><cell>");
+				sb.append(GTACCT);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT2);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT5);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT4);
+				sb.append("</cell><cell>");
+				
+				sb.append(SEGMENT6);
+				sb.append("</cell><cell>");
+				sb.append(TRCTYP);
+				sb.append("</cell><cell>");
+				sb.append(TRDORC);
+				sb.append("</cell><cell>");
+				sb.append(TRAMT);
+				sb.append("</cell><cell>");
+				sb.append(TREFTH);
+				sb.append("</cell><cell>");
+				sb.append(ZCHANREFNO);
+				sb.append("</cell><cell>");
+				sb.append(TRREFN);
+				sb.append("</cell><cell>");
+				sb.append(thuyet_minh);
+				sb.append("</cell><cell>");
+				sb.append(trang_thai);
+				sb.append("</cell><cell>");
+				sb.append(ngay_tat_toan);
+				sb.append("</cell><cell>");
+				sb.append(id_dulieu);
+				sb.append("</cell><cell>");
+				sb.append(duyet_bc);
+				sb.append("</cell><cell>");
+				sb.append(user_nhap);
+				sb.append("</cell><cell>");
+				sb.append(user_duyet);
+				sb.append("</cell></row>");
+				
+			}
+
+			return "<rows><page>" + getDTO.getPage() + "</page><total>"
+					+ String.valueOf(iTotalPage) + "</total><records>"
+					+ String.valueOf(count) + "</records>" + sb.toString()
+					+ "</rows>";
+		} catch (Exception ex) {
+			System.out.println("Error - Phe duyet:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+	}
+
+	public String TimKiem_Luoi2(GetDTO getDTO, String WhereCondition) {
+		try {
+			String tu_ngay = Utils.getTag(WhereCondition, "<DATE>", "</DATE>");
+			String den_ngay = Utils.getTag(WhereCondition, "<DATE>", "</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereCondition, "<CHINHANH>","</CHINHANH>");
+			String chenh_lech_param = Utils.getTag(WhereCondition,"<CHENHLECH>", "</CHENHLECH>");
+			
+            /*
+			DateFormat dateFormat = new SimpleDateFormat("ddMMyyyyHHmmss");
+		    Date date = new Date();
+		    String key = chi_nhanh_param + String.valueOf(dateFormat.format(date));
+			*/
+		      
+		    DateFormat dateFormat = new SimpleDateFormat("yyyyMMddHHmmss");
+		    Date date = new Date();
+		    
+		    Random rn = new Random();
+	        int range = 1000;
+	        int randomNum = 1 + rn.nextInt(range);
+	       	    
+		    String key = String.valueOf(dateFormat.format(date)) + String.valueOf(randomNum);
+		    
+			String where = " where key_time = '" + key + "'";
+			if (chenh_lech_param.equals("ALL")){}
+			else			
+			{
+					where = where + " and CHENH_LECH != 0";
+			}
+
+
+			// Call Store
+			Connection conn = null;		
+			conn = DB.getConnection().getDataSource().getConnection();
+			try(CallableStatement st  = conn.prepareCall("{call BC_BM04(?,?,?,?)}")){
+			    st.setString("ChiNhanh", chi_nhanh_param);
+			    st.setString("TuNgay", tu_ngay);
+			    st.setString("DenNgay", den_ngay);	
+			    st.setString("key", key);
+			    st.execute();
+			}
+			///////////////////////////////////////////////////////////////////////////
+
+			int ipage = Integer.parseInt(getDTO.getPage());
+			int ilimit = Integer.parseInt(getDTO.getLimit());
+			String Start = String.valueOf((ipage - 1) * ilimit + 1);
+			String End = String.valueOf(ipage * ilimit);
+			int count = 0;
+			// mệnh đề where được dùng để phân trang.
+			SqlRowSet rs;
+			int iTotalPage;
+			if (getDTO.getSidx().equals("STT"))
+				getDTO.setSidx("STT");
+			String count_sql = "select count(*) from TEMP_BC_BM04 " + where;
+			count = DB.jdbcTemplate.queryForInt(count_sql);
+			iTotalPage = count / ilimit;
+			int acCount = iTotalPage * ilimit;
+			if (acCount < count)
+				iTotalPage++;
+
+			String where_stt = " where STT between " + Start + " and " + End;
+			// Chi co 30 Tai khoan x 30 ma tien te ~ 1000 key
+			// Lai con phai co chenh lech khac 0 nua chu
+			where_stt = " where STT between 1 and 10000 ";
+
+			String sql =
+
+			"select CN, TK,SEGMENT2, SEGMENT5,SEGMENT4,SEGMENT6, MATT, NGAY, TRAMT1, TRAMT2, CHENHLECH from "
+					+ "(select rownum as STT," + "to_char(A.TRBR) as CN,"
+					+ "to_number(A.GTACCT) as TK," 
+					+ "A.SEGMENT2, A.SEGMENT4,A.SEGMENT5,A.SEGMENT6,"
+					+ "to_char(A.TRCTYP) as MATT,"
+					+ "to_char(A.ngay_bao_cao, 'dd/mm/yyyy') as NGAY," + "to_number(A.CAN_DOI) as TRAMT1,"
+					+ "to_number(A.THUYET_MINH) as TRAMT2,"
+					+ "to_number(A.CHENH_LECH) as CHENHLECH"
+					
+					+ " from TEMP_BC_BM04 A " 
+					+ "inner join QLTKTG_THAMSO_MA_TKTG b on A.GTACCT = b.ACCT_CODE" 
+					+ where + ") " + where_stt
+					//+ " Order by STT";
+					+ " Order by CN, TK, MATT ";
+
+			rs = DB.jdbcTemplate.queryForRowSet(sql);
+
+			StringBuilder sb = new StringBuilder();
+			while (rs.next()) {
+				String CN = Utils.toHTML(rs.getString("CN"));
+				String TK = Utils.toHTML(rs.getString("TK"));
+				String SEGMENT2 = Utils.toHTML(rs.getString("SEGMENT2"));
+				String SEGMENT5 = Utils.toHTML(rs.getString("SEGMENT5"));
+				String SEGMENT4 = Utils.toHTML(rs.getString("SEGMENT4"));
+				
+				String SEGMENT6 = Utils.toHTML(rs.getString("SEGMENT6"));
+				String MATT = Utils.toHTML(rs.getString("MATT"));
+				String NGAY = Utils.toHTML(rs.getString("NGAY"));
+				String TRAMT1 = Utils.toHTML(rs.getString("TRAMT1"));
+				String TRAMT2 = Utils.toHTML(rs.getString("TRAMT2"));
+				String CHENHLECH = Utils.toHTML(rs.getString("CHENHLECH"));
+
+				sb.append("<row><cell>");
+				sb.append(CN);
+				sb.append("</cell><cell>");
+				sb.append(TK);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT2);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT5);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT4);
+				sb.append("</cell><cell>");
+				
+				sb.append(SEGMENT6);
+				sb.append("</cell><cell>");
+				sb.append(MATT);
+				sb.append("</cell><cell>");
+				sb.append(NGAY);
+				sb.append("</cell><cell>");
+				sb.append(TRAMT1);
+				sb.append("</cell><cell>");
+				sb.append(TRAMT2);
+				sb.append("</cell><cell>");
+
+				sb.append(CHENHLECH);
+				sb.append("</cell></row>");
+			}
+
+			return "<rows><page>" + getDTO.getPage() + "</page><total>"
+					+ String.valueOf(iTotalPage) + "</total><records>"
+					+ String.valueOf(count) + "</records>" + sb.toString()
+					+ "</rows>";
+		} catch (Exception ex) {
+			System.out.println("Error - BM03:" + ex.getMessage());
+			return "";
+		}
+	}
+
+	public String phe_duyet(String WhereConditon, String UserName,
+			String UserBranch, String ipAddress) 
+	{
+		try 
+		{
+			String ngay_giao_dich = Utils.getTag(WhereConditon, "<DATE>",
+					"</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereConditon, "<CHINHANH>",
+					"</CHINHANH>");
+
+			if (chi_nhanh_param.contains("CN"))
+			{
+				chi_nhanh_param = chi_nhanh_param.substring(2);
+			}	
+			
+			// Check null o JSP
+			String where_sql = "";
+			where_sql = "where ngay_bao_cao = to_date(" + "'" + ngay_giao_dich
+					+ "','dd/mm/yyyy')";
+			where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+	
+			String sql = "update qltktg_glstrn" + " SET DUYET_BC= 'Y' " + where_sql;
+
+			int res;
+			res = DB.jdbcTemplate.update(sql);
+
+			sql = sql.replace("'", "''");
+			LogsImpl.WriteLogs_QLTKTG(UserName, ipAddress, UserBranch, "9", sql);
+			return "Success";
+		} 
+		catch (Exception ex) 
+		{
+			System.out.println("Error - Duyet bao cao:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+
+	}
+
+	public String huy_duyet(String WhereConditon, String UserName,
+			String UserBranch, String ipAddress) 
+	{
+		try 
+		{
+			String ngay_giao_dich = Utils.getTag(WhereConditon, "<DATE>",
+					"</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereConditon, "<CHINHANH>",
+					"</CHINHANH>");
+			
+			if (chi_nhanh_param.contains("CN"))
+			{
+				chi_nhanh_param = chi_nhanh_param.substring(2);
+			}
+			
+			// Check null o JSP
+			String where_sql = "";
+			where_sql = "where ngay_bao_cao = to_date(" + "'" + ngay_giao_dich
+					+ "','dd/mm/yyyy')";
+			where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+
+			String sql = "update qltktg_glstrn" + " SET DUYET_BC= 'N' "
+					+ where_sql;
+
+			int res;
+			res = DB.jdbcTemplate.update(sql);
+
+			sql = sql.replace("'", "''");
+			LogsImpl.WriteLogs_QLTKTG(UserName, ipAddress, UserBranch, "9", sql);
+			return "Success";
+		} catch (Exception ex) {
+			System.out.println("Error-GiaFTPCoSo:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+
+	}
+
+	public Map Xuat_BC(GetDTO getDTO, String WhereCondition) 
+	{
+		try 
+		{
+			String ngay_giao_dich = Utils.getTag(WhereCondition, "<DATE>","</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereCondition, "<CHINHANH>","</CHINHANH>");
+			
+			String sql = "";
+			String sql3 = "";
+			
+			//CN
+			if (chi_nhanh_param.contains("CN"))
+			{
+				String chi_nhanh_param_2 = chi_nhanh_param.substring(2);
+				
+				sql = 
+						"select case\n" +
+						"               when b.TRDORC = 'C' then b.TRAMT\n" + 
+						"               else -b.TRAMT\n" + 
+						"       end TRAMT,\n" + 
+						"       b.TRBR,\n" + 
+						"       b.PHONG_BAN PHONGBAN,\n" + 
+						"       b.gtacct,\n" + 
+					    "		nvl(b.SEGMENT2,0) as MaPhongban,\n" +
+						"		nvl(b.SEGMENT5,0) as MaSanpham,\n" +
+					    "		nvl(b.SEGMENT4,0) as MaDVLQ,\n" +
+						"		nvl(b.SEGMENT6,0) as MaKH,\n" +
+						"       b.trctyp,\n" + 
+						"       to_char(b.datadate7, 'dd/mm/yyyy') DATADATE7,\n" + 
+						"       b.trusrn,\n" + 
+						"       b.trseq,\n" + 
+						"       b.trefth NOI_DUNG,\n" + 
+						"       b.thuyet_minh,\n" + 
+						"       a.BEGIN_ACCOUNTED_DR\n" + 
+						"  from (select '00'||SEGMENT1 CHI_NHANH,\n" + 
+						"               SEGMENT3 ACCOUNT1,\n" + 
+						"               SEGMENT2 ,\n" + 
+						"               SEGMENT5 ,\n" + 
+						"               SEGMENT4 ,\n" + 
+						"               SEGMENT6 ,\n" + 
+						"               CURRENCY_CODE,\n" + 
+						"               to_number(ENDING_ENTERED_CR - ENDING_ENTERED_DR) BEGIN_ACCOUNTED_DR\n" + 
+						"          from QLTKTG_ERP_GL0206\n" + 
+						"         where '00'||SEGMENT1 in (select '00' || BDS_CODE from qltktg_thamso_bds where branch_code ='" + chi_nhanh_param_2 + "')"
+						+ "           and den_ngay = to_date('" + ngay_giao_dich + "', 'dd/mm/yyyy')\n" + 
+						"         order by SEGMENT3, CURRENCY_CODE) a\n" + 
+						" inner join\n" + 
+						"        (SELECT * FROM  qltktg_glstrn\n" + 
+						"         where TRBR in (select BDS_CODE from qltktg_thamso_bds where branch_code = '" +  chi_nhanh_param_2 + "')"
+						+ "         and ngay_bao_cao = to_date('" + ngay_giao_dich + "', 'dd/mm/yyyy')\n" + 
+						" and trang_thai in (2)\n" + 
+						"         ) b\n" + 
+						"    on a.CURRENCY_CODE = b.trctyp\n" + 
+						"   and a.ACCOUNT1 = b.gtacct\n" + 
+						"   and nvl(cast(a.SEGMENT2 as number),0) = nvl(b.SEGMENT2,0)\n" + 
+						"   and nvl(cast(a.SEGMENT5 as number),0) = nvl(b.SEGMENT5,0)\n" + 
+						"   and nvl(cast(a.SEGMENT4 as number),0) = nvl(b.SEGMENT4,0)\n" + 
+						"   and nvl(cast(a.SEGMENT6 as number),0) = nvl(b.SEGMENT6,0)\n" + 
+						"   and '00' || b.trbr = a.CHI_NHANH\n" + 
+						"\n" + 
+						"union all\n" + 
+						"\n" + 
+						"select\n" + 
+						"       0 TRAMT,\n" + 
+						"       TRBR,\n" + 
+						"       N'SYSTEM_AUTO' PHONGBAN,\n" +
+						"       gtacct,\n" + 
+						"		nvl(SEGMENT2,0) as MaPhongban,\n" +
+						"		nvl(SEGMENT5,0) as MaSanpham,\n" +
+					    "		nvl(cast(Q.SEGMENT4 as number(6)),0) as MaDVLQ,\n" +
+						"		nvl(cast(Q.SEGMENT6 as number(4)),0) as MaKH,\n" +
+						"       trctyp,\n" + 
+						"       to_char(sysdate, 'dd/mm/yyyy') DATADATE7,\n" + 
+						"       N'SYSTEM_AUTO' trusrn,\n" + 
+						"       N'SYSTEM_AUTO' trseq,\n" + 
+						"       N'SYSTEM_AUTO' NOI_DUNG,\n" + 
+						"       N'SYSTEM_AUTO' thuyet_minh,\n" + 
+						"       BEGIN_ACCOUNTED_DR\n" + 
+						"from\n" + 
+						"(\n" + 
+						"   select * from\n" + 
+						"    (\n" + 
+						"      select distinct '00'||SEGMENT1 TRBR ,SEGMENT3 gtacct, SEGMENT2,SEGMENT5,SEGMENT4,SEGMENT6, CURRENCY_CODE trctyp,\n" + 
+						"                      to_number(ENDING_ENTERED_CR - ENDING_ENTERED_DR) BEGIN_ACCOUNTED_DR\n" + 
+						"        from QLTKTG_ERP_GL0206\n" + 
+						//"       where chi_nhanh = '00" + chi_nhanh_param +"'\n" + 
+						"         where SEGMENT1 in (select '00' || BDS_CODE from qltktg_thamso_bds where branch_code ='" + chi_nhanh_param_2 + "')"
+						+ "         and den_ngay = to_date('" + ngay_giao_dich + "', 'dd/mm/yyyy')\n" +
+						"         and abs(ENDING_ENTERED_CR - ENDING_ENTERED_DR) > 0\n" + 
+						"       ORDER BY SEGMENT3, CURRENCY_CODE\n" + 
+						"    ) Q\n" + 
+						"\n" + 
+						"    where to_char(Q.TRBR) || to_char(Q.gtacct) || to_char(Q.trctyp) not in\n" + 
+						"    (\n" + 
+						"      select KEY_1 from\n" + 
+						"      (\n" + 
+						"        select\n" + 
+						"          A.TRBR || to_char(A.gtacct) || to_char(A.trctyp) as KEY_1 \n" + 
+						"        from\n" + 
+						"        (\n" + 
+						"        select distinct '00'||SEGMENT1 TRBR ,SEGMENT3 gtacct, SEGMENT2,SEGMENT5,SEGMENT4,SEGMENT6, CURRENCY_CODE trctyp\n" + 
+						"          from QLTKTG_ERP_GL0206\n" + 
+						//"         where chi_nhanh = '00" + chi_nhanh_param + "'\n" +
+						"         where '00' ||SEGMENT1 in (select '00' || BDS_CODE from qltktg_thamso_bds where branch_code ='" + chi_nhanh_param_2 + "')"
+						+ "         and den_ngay = to_date('" + ngay_giao_dich + "', 'dd/mm/yyyy')\n" +
+						"           and abs(ENDING_ENTERED_CR - ENDING_ENTERED_DR) > 0\n" + 
+						"         ORDER BY SEGMENT3, CURRENCY_CODE\n" + 
+						"        ) A\n" + 
+						"        inner join\n" + 
+						"        (\n" + 
+						"        SELECT distinct '00' ||TRBR, gtacct,SEGMENT2,SEGMENT5,SEGMENT4,SEGMENT6,  TRCTYP\n" + 
+						"          FROM qltktg_glstrn\n" + 
+						//"         where TRBR =" + chi_nhanh_param + "\n" + 
+						"         where '00' ||TRBR in (select '00' ||BDS_CODE from qltktg_thamso_bds where branch_code = '" +  chi_nhanh_param_2 + "')"
+						+"         and ngay_bao_cao = to_date('" + ngay_giao_dich + "', 'dd/mm/yyyy')\n" +
+						"           and trang_thai in (2)\n" + 
+						"        ) B\n" + 
+						"        on A.gtacct = B.gtacct\n" + 
+						"           and A.trctyp = B.TRCTYP\n" + 
+						"           and A.TRBR = B.TRBR\n" +
+						"   and nvl(cast(a.SEGMENT2 as number),0) = nvl(b.SEGMENT2,0)\n" + 
+						"   and nvl(cast(a.SEGMENT5 as number),0) = nvl(b.SEGMENT5,0)\n" + 
+						"   and nvl(cast(a.SEGMENT4 as number),0) = nvl(b.SEGMENT4,0)\n" + 
+						"   and nvl(cast(a.SEGMENT6 as number),0) = nvl(b.SEGMENT6,0)\n" + 
+						"      )\n" + 
+						"    )\n" + 
+						")";
+				   
+				    sql3 = "select distinct SEGMENT1 TRBR , SEGMENT3 gtacct, SEGMENT2,SEGMENT5,cast(SEGMENT4 as number(6)) as SEGMENT4,cast(SEGMENT6 as number(4)) as SEGMENT6, CURRENCY_CODE trctyp from QLTKTG_ERP_GL0206 a inner join QLTKTG_THAMSO_MA_TKTG b on A.SEGMENT3 = b.ACCT_CODE\n"
+						+ "where '00' ||SEGMENT1 in (select '00' || BDS_CODE from qltktg_thamso_bds where branch_code = '" 
+						+ chi_nhanh_param_2 + "')" + "\n"
+						+ "and (SEGMENT3 like '18%' or SEGMENT3 like '28%' or SEGMENT3 like '33%') \n"
+						+ "and den_ngay = to_date('"
+						+ ngay_giao_dich
+						+ "','dd/mm/yyyy')\n"
+						//+ "and abs(END_ACCOUNTED_CR - END_ACCOUNTED_DR) > 0 ORDER BY account, CURRENCY";
+						+ " ORDER BY SEGMENT3, CURRENCY_CODE";	
+			};
+			
+			// BDS
+			if (!chi_nhanh_param.contains("CN") && !chi_nhanh_param.contains("000") )
+			{	
+			   sql = 
+					"select case\n" +
+					"               when b.TRDORC = 'C' then b.TRAMT\n" + 
+					"               else -b.TRAMT\n" + 
+					"       end TRAMT,\n" + 
+					"       b.TRBR,\n" + 
+					"       b.PHONG_BAN PHONGBAN,\n" + 
+					"       b.gtacct,\n" + 
+					"		nvl(b.SEGMENT2,0) as MaPhongban,\n" +
+					"		nvl(b.SEGMENT5,0) as MaSanpham,\n" +
+				    "		nvl(b.SEGMENT4,0) as MaDVLQ,\n" +
+					"		nvl(b.SEGMENT6,0) as MaKH,\n" +
+					"       b.trctyp,\n" + 
+					"       to_char(b.datadate7, 'dd/mm/yyyy') DATADATE7,\n" + 
+					"       b.trusrn,\n" + 
+					"       b.trseq,\n" + 
+					"       b.trefth NOI_DUNG,\n" + 
+					"       b.thuyet_minh,\n" + 
+					"       a.BEGIN_ACCOUNTED_DR\n" + 
+					"  from (select '00'||SEGMENT1 CHI_NHANH,\n" + 
+					"               SEGMENT3 ACCOUNT1,\n" + 
+					"               SEGMENT2 ,\n" + 
+					"               SEGMENT5 ,\n" + 
+					"               SEGMENT4 ,\n" + 
+					"               SEGMENT6 ,\n" + 
+					"               CURRENCY_CODE CURRENCY,\n" + 
+					"               to_number(ENDING_ENTERED_CR - ENDING_ENTERED_CR) BEGIN_ACCOUNTED_DR\n" + 
+					"          from QLTKTG_ERP_GL0206\n" + 
+					"         where '00'||SEGMENT1 = '00' || " + chi_nhanh_param + "           and den_ngay = to_date('" + ngay_giao_dich + "', 'dd/mm/yyyy')\n" + 
+					"         order by SEGMENT1, CURRENCY_CODE) a\n" + 
+					" inner join\n" + 
+					"        (SELECT * FROM  qltktg_glstrn\n" + 
+					"         where TRBR =" + chi_nhanh_param + "         and ngay_bao_cao = to_date('" + ngay_giao_dich + "', 'dd/mm/yyyy')\n" + 
+					" and trang_thai in (2)\n" + 
+					"         ) b\n" + 
+					"    on a.CURRENCY = b.trctyp\n" + 
+					"   and a.ACCOUNT1 = b.gtacct\n" + 
+					"   and nvl(cast(a.SEGMENT2 as number),0) = nvl(b.SEGMENT2,0)\n" + 
+					"   and nvl(cast(a.SEGMENT5 as number),0) = nvl(b.SEGMENT5,0)\n" + 
+					"   and nvl(cast(a.SEGMENT4 as number),0) = nvl(b.SEGMENT4,0)\n" + 
+					"   and nvl(cast(a.SEGMENT6 as number),0) = nvl(b.SEGMENT6,0)\n" + 
+					"   and '00' || b.trbr = a.CHI_NHANH\n" + 
+					"\n" + 
+					"union all\n" + 
+					"\n" + 
+					"select\n" + 
+					"       0 TRAMT,\n" + 
+					"       N'" + chi_nhanh_param + "' TRBR,\n" + 
+					"       N'SYSTEM_AUTO' PHONGBAN,\n" +
+					"       gtacct,\n" + 
+					"		nvl(SEGMENT2,0) as MaPhongban,\n" +
+					"		nvl(SEGMENT5,0) as MaSanpham,\n" +
+				    "		nvl(cast(SEGMENT4 as number(6)),0) as MaDVLQ,\n" +
+					"		nvl(cast(SEGMENT6 as number(4)),0) as MaKH,\n" +
+					"       trctyp,\n" + 
+					"       to_char(sysdate, 'dd/mm/yyyy') DATADATE7,\n" + 
+					"       N'SYSTEM_AUTO' trusrn,\n" + 
+					"       N'SYSTEM_AUTO' trseq,\n" + 
+					"       N'SYSTEM_AUTO' NOI_DUNG,\n" + 
+					"       N'SYSTEM_AUTO' thuyet_minh,\n" + 
+					"       BEGIN_ACCOUNTED_DR\n" + 
+					"from\n" + 
+					"(\n" + 
+					"   select * from\n" + 
+					"    (\n" + 
+					"      select distinct SEGMENT3 gtacct, CURRENCY_CODE trctyp,SEGMENT2,SEGMENT5,SEGMENT4,SEGMENT6,\n" + 
+					"                      to_number(ENDING_ENTERED_CR - ENDING_ENTERED_DR) BEGIN_ACCOUNTED_DR\n" + 
+					"        from QLTKTG_ERP_GL0206\n" + 
+					"       where '00'||SEGMENT1 = '00" + chi_nhanh_param +"'\n" + 
+					"         and den_ngay = to_date('" + ngay_giao_dich + "', 'dd/mm/yyyy')\n" +
+					"         and abs(ENDING_ENTERED_CR - ENDING_ENTERED_DR) > 0\n" + 
+					"       ORDER BY SEGMENT3, CURRENCY_CODE\n" + 
+					"    ) Q\n" + 
+					"\n" + 
+					"    where to_char(Q.gtacct) || to_char(Q.trctyp) not in\n" + 
+					"    (\n" + 
+					"      select KEY from\n" + 
+					"      (\n" + 
+					"        select\n" + 
+					"          to_char(A.gtacct) || to_char(A.trctyp) as KEY\n" + 
+					"        from\n" + 
+					"        (\n" + 
+					"        select distinct '00'||SEGMENT3 gtacct, SEGMENT2,SEGMENT5,SEGMENT4,SEGMENT6,CURRENCY_CODE trctyp\n" + 
+					"          from QLTKTG_ERP_GL0206\n" + 
+					"         where '00'||SEGMENT1 = '00" + chi_nhanh_param + "'\n" +
+					"         and den_ngay = to_date('" + ngay_giao_dich + "', 'dd/mm/yyyy')\n" +
+					"           and abs(ENDING_ENTERED_CR - ENDING_ENTERED_DR) > 0\n" + 
+					"         ORDER BY SEGMENT3, CURRENCY_CODE\n" + 
+					"        ) A\n" + 
+					"        inner join\n" + 
+					"        (\n" + 
+					"        SELECT distinct gtacct,SEGMENT2,SEGMENT5,SEGMENT4,SEGMENT6, TRCTYP\n" + 
+					"          FROM qltktg_glstrn\n" + 
+					"         where TRBR =" + chi_nhanh_param + "\n" + 
+					"         and ngay_bao_cao = to_date('" + ngay_giao_dich + "', 'dd/mm/yyyy')\n" +
+					"           and trang_thai in (2)\n" + 
+					"        ) B\n" + 
+					"        on A.gtacct = B.gtacct\n" + 
+					"           and A.trctyp = B.TRCTYP\n" + 
+					"   and nvl(cast(a.SEGMENT2 as number),0) = nvl(b.SEGMENT2,0)\n" + 
+					"   and nvl(cast(a.SEGMENT5 as number),0) = nvl(b.SEGMENT5,0)\n" + 
+					"   and nvl(cast(a.SEGMENT4 as number),0) = nvl(b.SEGMENT4,0)\n" + 
+					"   and nvl(cast(a.SEGMENT6 as number),0) = nvl(b.SEGMENT6,0)\n" + 
+					"      )\n" + 
+					"    )\n" + 
+					")";
+			   
+			    sql3 = "select distinct SEGMENT1 TRBR , SEGMENT3 gtacct, SEGMENT2,SEGMENT5,cast(SEGMENT4 as number(6)) as SEGMENT4,cast(SEGMENT6 as number(4)) as SEGMENT6,CURRENCY_CODE trctyp from QLTKTG_ERP_GL0206 a inner join QLTKTG_THAMSO_MA_TKTG b on A.SEGMENT3 = b.ACCT_CODE\n"
+					+ "where '00'||SEGMENT1 = '00"
+					+ chi_nhanh_param
+					+ "'\n"
+					+ "and (SEGMENT3 like '18%' or SEGMENT3 like '28%' or SEGMENT3 like '33%') \n"
+					+ "and den_ngay = to_date('"
+					+ ngay_giao_dich
+					+ "','dd/mm/yyyy')\n"
+					//+ "and abs(END_ACCOUNTED_CR - END_ACCOUNTED_DR) > 0 ORDER BY account, CURRENCY";
+					+ " ORDER BY SEGMENT3, CURRENCY_CODE";
+			};
+			
+			// Toan hang
+			if (chi_nhanh_param.contains("000") )
+			{	
+				sql = 
+						"select case\n" +
+						"               when b.TRDORC = 'C' then b.TRAMT\n" + 
+						"               else -b.TRAMT\n" + 
+						"       end TRAMT,\n" + 
+						"       b.TRBR,\n" + 
+						"       b.PHONG_BAN PHONGBAN,\n" + 
+						"       b.gtacct,\n" + 
+						"		nvl(b.SEGMENT2,0) as MaPhongban,\n" +
+						"		nvl(b.SEGMENT5,0) as MaSanpham,\n" +
+					    "		nvl(b.SEGMENT4,0) as MaDVLQ,\n" +
+						"		nvl(b.SEGMENT6,0) as MaKH,\n" +
+						"       b.trctyp,\n" + 
+						"       to_char(b.datadate7, 'dd/mm/yyyy') DATADATE7,\n" + 
+						"       b.trusrn,\n" + 
+						"       b.trseq,\n" + 
+						"       b.trefth NOI_DUNG,\n" + 
+						"       b.thuyet_minh,\n" + 
+						"       a.BEGIN_ACCOUNTED_DR\n" + 
+						"  from (select '00'||SEGMENT1,\n" + 
+						"               SEGMENT3 ACCOUNT1,\n" + 
+						"               CURRENCY_CODE CURRENCY,\n" + 
+						"               to_number(ENDING_ENTERED_CR - ENDING_ENTERED_DR) BEGIN_ACCOUNTED_DR\n" + 
+						"          from QLTKTG_ERP_GL0206\n" + 
+						"         where "
+						+ "           den_ngay = to_date('" + ngay_giao_dich + "', 'dd/mm/yyyy')\n" + 
+						"         order by SEGMENT3, CURRENCY_CODE) a\n" + 
+						" inner join\n" + 
+						"        (SELECT * FROM  qltktg_glstrn\n" + 
+						"         where "
+						+ "         ngay_bao_cao = to_date('" + ngay_giao_dich + "', 'dd/mm/yyyy')\n" + 
+						" and trang_thai in (2)\n" + 
+						"         ) b\n" + 
+						"    on a.CURRENCY = b.trctyp\n" + 
+						"   and a.ACCOUNT1 = b.gtacct\n" + 
+						"   and nvl(cast(a.SEGMENT2 as number),0) = nvl(b.SEGMENT2,0)\n" + 
+						"   and nvl(cast(a.SEGMENT5 as number),0) = nvl(b.SEGMENT5,0)\n" + 
+						"   and nvl(cast(a.SEGMENT4 as number),0) = nvl(b.SEGMENT4,0)\n" + 
+						"   and nvl(cast(a.SEGMENT6 as number),0) = nvl(b.SEGMENT6,0)\n" + 
+						"   and '00' || b.trbr = a.CHI_NHANH\n" + 
+						"\n" + 
+						"union all\n" + 
+						"\n" + 
+						"select\n" + 
+						"       0 TRAMT,\n" + 
+						"       TRBR,\n" + 
+						"       N'SYSTEM_AUTO' PHONGBAN,\n" +
+						"       gtacct,\n" + 
+						"		nvl(SEGMENT2,0) as MaPhongban,\n" +
+						"		nvl(SEGMENT5,0) as MaSanpham,\n" +
+					    "		nvl(cast(SEGMENT4 as number(6)),0) as MaDVLQ,\n" +
+						"		nvl(cast(SEGMENT6 as number(4)),0) as MaKH,\n" +
+						"       trctyp,\n" + 
+						"       to_char(sysdate, 'dd/mm/yyyy') DATADATE7,\n" + 
+						"       N'SYSTEM_AUTO' trusrn,\n" + 
+						"       N'SYSTEM_AUTO' trseq,\n" + 
+						"       N'SYSTEM_AUTO' NOI_DUNG,\n" + 
+						"       N'SYSTEM_AUTO' thuyet_minh,\n" + 
+						"       BEGIN_ACCOUNTED_DR\n" + 
+						"from\n" + 
+						"(\n" + 
+						"   select * from\n" + 
+						"    (\n" + 
+						"      select distinct '00'||SEGMENT1 TRBR ,SEGMENT3 gtacct, CURRENCY_CODE trctyp,SEGMENT2,SEGMENT5,SEGMENT4,SEGMENT6,\n" + 
+						"                      to_number(ENDING_ENTERED_CR - ENDING_ENTERED_DR) BEGIN_ACCOUNTED_DR\n" + 
+						"        from QLTKTG_ERP_GL0206\n" + 
+						"         where "
+						+ "         den_ngay = to_date('" + ngay_giao_dich + "', 'dd/mm/yyyy')\n" +
+						"         and abs(ENDING_ENTERED_CR - ENDING_ENTERED_DR) > 0\n" + 
+						"       ORDER BY SEGMENT3, CURRENCY_CODE\n" + 
+						"    ) Q\n" + 
+						"\n" + 
+						"    where to_char(Q.TRBR) || to_char(Q.gtacct) || to_char(Q.trctyp) not in\n" + 
+						"    (\n" + 
+						"      select KEY_1 from\n" + 
+						"      (\n" + 
+						"        select\n" + 
+						"          A.TRBR || to_char(A.gtacct) || to_char(A.trctyp) as KEY_1 \n" + 
+						"        from\n" + 
+						"        (\n" + 
+						"        select distinct SEGMENT1 TRBR ,SEGMENT3 gtacct,SEGMENT2,SEGMENT5,SEGMENT4,SEGMENT6, CURRENCY_CODE trctyp\n" + 
+						"          from QLTKTG_ERP_GL0206\n" + 
+						"         where "
+						+ "         den_ngay = to_date('" + ngay_giao_dich + "', 'dd/mm/yyyy')\n" +
+						"           and abs(ENDING_ENTERED_CR - ENDING_ENTERED_DR) > 0\n" + 
+						"         ORDER BY SEGMENT3, CURRENCY_CODE\n" + 
+						"        ) A\n" + 
+						"        inner join\n" + 
+						"        (\n" + 
+						"        SELECT distinct TRBR, gtacct, SEGMENT2,SEGMENT5,SEGMENT4,SEGMENT6,TRCTYP\n" + 
+						"          FROM qltktg_glstrn\n" + 
+						"         where "
+						+"         ngay_bao_cao = to_date('" + ngay_giao_dich + "', 'dd/mm/yyyy')\n" +
+						"           and trang_thai in (2)\n" + 
+						"        ) B\n" + 
+						"        on A.gtacct = B.gtacct\n" + 
+						"           and A.trctyp = B.TRCTYP\n" + 
+						"           and A.TRBR = B.TRBR\n" +
+						"   and nvl(cast(a.SEGMENT2 as number),0) = nvl(b.SEGMENT2,0)\n" + 
+						"   and nvl(cast(a.SEGMENT5 as number),0) = nvl(b.SEGMENT5,0)\n" + 
+						"   and nvl(cast(a.SEGMENT4 as number),0) = nvl(b.SEGMENT4,0)\n" + 
+						"   and nvl(cast(a.SEGMENT6 as number),0) = nvl(b.SEGMENT6,0)\n" +  
+						"      )\n" + 
+						"    )\n" + 
+						")";
+				   
+				    sql3 = "select distinct SEGMENT1 TRBR , SEGMENT3 gtacct, SEGMENT2,SEGMENT5,cast(SEGMENT4 as number(6)) as SEGMENT4,cast(SEGMENT6 as number(4)) as SEGMENT6,CURRENCY_CODE trctyp from QLTKTG_ERP_GL0206 a inner join QLTKTG_THAMSO_MA_TKTG b on A.SEGMENT3 = b.ACCT_CODE\n"
+						+ "where "
+						+ "and (SEGMENT3 like '18%' or SEGMENT3 like '28%' or SEGMENT3 like '33%') \n"
+						+ " den_ngay = to_date('"
+						+ ngay_giao_dich
+						+ "','dd/mm/yyyy')\n"
+						+ " ORDER BY SEGMENT3, CURRENCY_CODE";
+			};			
+			
+			
+			
+			List<BaoCaoBM03DTO> goc = new ArrayList<BaoCaoBM03DTO>();
+
+			SqlRowSet rs = null;
+			SqlRowSet rs1 = null;
+			rs1 = DB.jdbcTemplate.queryForRowSet(sql3);
+			rs = DB.jdbcTemplate.queryForRowSet(sql);
+			while (rs1.next()) {
+				BaoCaoBM03DTO dto1 = new BaoCaoBM03DTO();
+				dto1.setGTACCT(Utils.checkNull(rs1.getString("GTACCT")));
+				dto1.setTRCTYP(Utils.checkNull(rs1.getString("TRCTYP")));
+				dto1.setTRBR(Utils.checkNull(rs1.getString("TRBR")));
+				dto1.setSEGEMENT2(Utils.checkNull(rs1.getString("SEGMENT2")));
+				dto1.setSEGEMENT4(Utils.checkNull(rs1.getString("SEGMENT4")));
+				dto1.setSEGEMENT5(Utils.checkNull(rs1.getString("SEGMENT5")));
+				dto1.setSEGEMENT6(Utils.checkNull(rs1.getString("SEGMENT6")));
+				goc.add(dto1);
+			}
+			while (rs.next()) {
+				for (BaoCaoBM03DTO item : goc) 
+				{
+					if (item.getGTACCT().equalsIgnoreCase(Utils.checkNull(rs.getString("GTACCT")))
+						&& item.getTRCTYP().equalsIgnoreCase(Utils.checkNull(rs.getString("TRCTYP")))
+						&& item.getTRBR().equalsIgnoreCase(Utils.checkNull(rs.getString("TRBR")))
+						&& item.getSEGEMENT2().equalsIgnoreCase(Utils.checkNull(rs.getString("MaPhongban")))
+						&& item.getSEGEMENT4().equalsIgnoreCase(Utils.checkNull(rs.getString("MaDVLQ")))
+						&& item.getSEGEMENT5().equalsIgnoreCase(Utils.checkNull(rs.getString("MaSanpham")))
+						&& item.getSEGEMENT6().equalsIgnoreCase(Utils.checkNull(rs.getString("MaKH")))
+					   ) 
+					{
+						BaoCaoBM03_1DTO dto2 = new BaoCaoBM03_1DTO();
+						dto2.setTRAMT(Double.parseDouble(Utils.checkNull(rs
+								.getString("TRAMT"))));
+						dto2.setPHONGBAN(Utils.checkNull(rs.getString("PHONGBAN")));
+						dto2.setTRBR(Utils.checkNull(rs.getString("TRBR")));
+						dto2.setGTACCT(Utils.checkNull(rs.getString("GTACCT")));
+						dto2.setMaPhongban(Utils.checkNull(rs.getString("MaPhongban")));
+						dto2.setMaSanpham(Utils.checkNull(rs.getString("MaSanpham")));
+						
+						dto2.setMaDVLQ(Utils.checkNull(rs.getString("MaDVLQ")));
+						dto2.setMaKH(Utils.checkNull(rs.getString("MaKH")));
+						dto2.setTRCTYP(Utils.checkNull(rs.getString("TRCTYP")));
+						dto2.setDATADATE7(Utils.checkNull(rs
+								.getString("DATADATE7")));
+						dto2.setTRUSRN(Utils.checkNull(rs.getString("TRUSRN")));
+						dto2.setTRSEQ(Utils.checkNull(rs.getString("TRSEQ")));
+						dto2.setNOI_DUNG(Utils.checkNull(rs
+								.getString("NOI_DUNG")));
+						dto2.setTHUYET_MINH(Utils.checkNull(rs
+								.getString("THUYET_MINH")));
+						item.setBEGIN_ACCOUNTED_DR(rs
+								.getString("BEGIN_ACCOUNTED_DR"));
+						item.getLst().add(dto2);
+					}
+				}
+
+			}
+			Map<String, List<?>> beans = new HashMap<String, List<?>>();
+
+			List<BaoCaoBM03DTO> gocNew = new ArrayList<BaoCaoBM03DTO>();
+			for (BaoCaoBM03DTO item : goc) {
+				if (item.getLst().size() > 0)
+					gocNew.add(item);
+			}
+			beans.put("items", gocNew);
+			return beans;		
+
+		} catch (Exception ex) {
+			System.out.println("Error - BM03:" + ex.getMessage());
+			return null;
+		}
+	}
+
+	public static java.util.List<Map<Object, Object>> getListForExprt(
+			ResultSet rs, String[] doubleColumns) {
+		java.util.List<Map<Object, Object>> lm = new ArrayList<Map<Object, Object>>();
+		try {
+			int n = rs.getMetaData().getColumnCount();
+			boolean check = false;
+			while (rs.next()) {
+				Map<Object, Object> hm = new HashMap<Object, Object>();
+				for (int i = 1; i <= n; i++) {
+					String colName = rs.getMetaData().getColumnName(i)
+							.replace("'", "");
+					try {
+						for (int j = 0; j < doubleColumns.length; j++) {
+							if (colName.equalsIgnoreCase(doubleColumns[j])) {
+								Double value = rs.getDouble(i);
+								hm.put(colName, value);
+								check = true;
+								break;
+							}
+						}
+						if (!check) {
+							String value = Utils.checkNull(rs.getString(i));
+							hm.put(colName, value);
+						}
+						check = false;
+					} catch (Exception e) {
+						// TODO: handle exception
+						System.out.print("getListForExprt");
+						////e.printStackTrace();
+
+					}
+
+				}
+				lm.add(hm);
+			}
+			return lm;
+		} catch (Exception ex) {
+			// Utils.writeException(ex);
+			System.out.print("getListForExprt");
+			//ex.printStackTrace();
+			return null;
+		}
+
+	}
+	
+	public String stripNonValidXMLCharacters(String in) {
+        StringBuffer out = new StringBuffer(); // Used to hold the output.
+        char current; // Used to reference the current character.
+
+        if (in == null || ("".equals(in))) return ""; // vacancy test.
+        for (int i = 0; i < in.length(); i++) {
+            current = in.charAt(i); // NOTE: No IndexOutOfBoundsException caught here; it should not happen.
+            if ((current == 0x9) ||
+                (current == 0xA) ||
+                (current == 0xD) ||
+                ((current >= 0x20) && (current <= 0xD7FF)) ||
+                ((current >= 0xE000) && (current <= 0xFFFD)) ||
+                ((current >= 0x10000) && (current <= 0x10FFFF)))
+                out.append(current);
+        }
+        return out.toString();
+    }
+
+} ;
+
+package com.bidv.ftp.jdbc;
+
+import java.io.*;
+import java.util.Date;
+import java.text.*;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat; 
+import java.text.DecimalFormat;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Types;
+ 
+import com.bidv.ftp.resource.DB;
+import com.bidv.ftp.util.Constants;
+import com.bidv.ftp.util.Utils;
+
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.SqlOutParameter;
+import org.springframework.jdbc.core.SqlParameter;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.sql.DataSource;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import org.springframework.jdbc.object.StoredProcedure;
+import org.springframework.jdbc.support.rowset.SqlRowSet;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+
+import com.bidv.ftp.dao.BaoCaoBM05DAO;
+import com.bidv.ftp.dto.BaoCaoBM05DTO;
+import com.bidv.ftp.dto.GetDTO;
+
+public class BaoCaoBM05Impl implements BaoCaoBM05DAO
+{
+
+	public String TimKiem(GetDTO getDTO, String WhereCondition)
+	{
+		try
+		{
+			String tu_ngay = Utils.getTag(WhereCondition,"<TUNGAY>","</TUNGAY>");
+			String den_ngay = Utils.getTag(WhereCondition,"<DENNGAY>","</DENNGAY>");		
+			String chi_nhanh_param = Utils.getTag(WhereCondition,"<CHINHANH>","</CHINHANH>");
+			String so_ngay_ton_param = Utils.getTag(WhereCondition,"<SONGAYTON>","</SONGAYTON>");
+						
+			// Da check Null tren JSP
+			String where_sql = "";
+			where_sql =	where_sql + " where ngay_bao_cao >= to_date(" +"'" + tu_ngay + "','dd/mm/yyyy')" ;	
+			where_sql = where_sql + " and ngay_bao_cao <= to_date(" +"'" + den_ngay + "','dd/mm/yyyy')" ;													
+			if (!chi_nhanh_param.contains("000"))
+			{
+				if (chi_nhanh_param.contains("CN"))
+				{
+					where_sql = where_sql + " and TRBR in " 
+					+ "(select BDS_CODE from qltktg_thamso_bds where branch_code like '" + chi_nhanh_param.substring(2) + "%')" ;
+				}
+				else
+				{
+					where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+				};
+			};				
+			where_sql = where_sql + " and " + so_ngay_ton_param + " <= ngay_bao_cao - datadate7 ";
+			where_sql = where_sql + " and trang_thai = '2' " ;
+			
+			int ipage = Integer.parseInt(getDTO.getPage());
+			int ilimit = Integer.parseInt(getDTO.getLimit());
+			String Start =  String.valueOf((ipage-1)*ilimit + 1);
+			String End = String.valueOf(ipage*ilimit);		
+			int count = 0;
+			// mệnh đề where được dùng để phân trang.
+			SqlRowSet rs ;
+			int iTotalPage;			
+			if (getDTO.getSidx().equals("STT"))	getDTO.setSidx("STT");
+			String count_sql = "select count(*) from qltktg_glstrn " + where_sql;	
+			count = DB.jdbcTemplate.queryForInt(count_sql);
+			iTotalPage = count/ilimit;
+			int acCount = iTotalPage * ilimit;
+			if (acCount<count) iTotalPage++ ;
+			
+			String where = " where STT between " + Start + " and " + End;	
+			
+			
+			String sql = 
+					"select * from ( " 
+					+ " select rownum as STT , TRBR, phong_ban, " +
+					"to_char(T1.ngay_bao_cao, 'dd/mm/yyyy') ngay_bao_cao , TRUSRN, " +
+					"to_char(DATADATE7, 'dd/mm/yyyy') DATADATE7,TRSEQ,GTACCT,SEGMENT2, SEGMENT5,SEGMENT4,SEGMENT6,TRCTYP,TRDORC,TRAMT,TREFTH,ZCHANREFNO,TRREFN,thuyet_minh,trang_thai," +
+					"to_char(ngay_tat_toan, 'dd/mm/yyyy') ngay_tat_toan,id_dulieu, duyet_bc " 
+					+ "from qltktg_glstrn " 
+					+ "T1 inner join ( "
+					+ "		select max(ngay_bao_cao) ngay_bao_cao, id_dulieu_goc from ( "
+					+ "		select * from qltktg_glstrn "	   
+					
+				    + where_sql + 
+				    " ) group by id_dulieu_goc ) T2 on T1.Ngay_Bao_Cao = T2.ngay_bao_cao and T1.ID_DULIEU_GOC = T2.ID_DULIEU_GOC  Order by TRBR, GTACCT, TRUSRN, TRCTYP, DATADATE7, TRUSRN)" 
+				    
+				    + where + " Order by STT";				
+			rs = DB.jdbcTemplate.queryForRowSet(sql);
+		
+			
+			StringBuilder sb = new StringBuilder();
+			while (rs.next()) 
+			{
+         		String TRBR = Utils.toHTML(rs.getString("TRBR"));
+				String phong_ban = Utils.toHTML(rs.getString("phong_ban"));
+				String ngay_bao_cao = Utils.toHTML(rs.getString("ngay_bao_cao"));				
+				String TRUSRN = Utils.toHTML(rs.getString("TRUSRN"));				
+				String DATADATE7 = Utils.toHTML(rs.getString("DATADATE7"));						
+				String TRSEQ = Utils.toHTML(rs.getString("TRSEQ"));	
+				String GTACCT = Utils.toHTML(rs.getString("GTACCT"));
+				String SEGMENT2 = Utils.toHTML(rs.getString("SEGMENT2"));
+				String SEGMENT5 = Utils.toHTML(rs.getString("SEGMENT5"));
+				String SEGMENT4 = Utils.toHTML(rs.getString("SEGMENT4"));
+				String SEGMENT6 = Utils.toHTML(rs.getString("SEGMENT6"));
+				String TRCTYP = Utils.toHTML(rs.getString("TRCTYP"));
+				String TRDORC = Utils.toHTML(rs.getString("TRDORC"));
+				String TRAMT = Utils.toHTML(rs.getString("TRAMT"));
+				//
+				String TREFTH = Utils.toHTML( Utils.checkNull(rs.getString("TREFTH")) );	
+				TREFTH = stripNonValidXMLCharacters(TREFTH);
+				//
+				String ZCHANREFNO = Utils.toHTML(rs.getString("ZCHANREFNO"));
+				String TRREFN = Utils.toHTML(rs.getString("TRREFN"));
+				String thuyet_minh = Utils.toHTML(rs.getString("thuyet_minh"));
+				String trang_thai = Utils.toHTML(rs.getString("trang_thai"));
+				if (trang_thai.equals("1") )
+				{
+					trang_thai = "1-Cho duyet";
+				}	
+				if (trang_thai.equals("2") )
+				{
+					trang_thai = "2-Da duyet";
+				}	
+				if (trang_thai.equals("3") )
+				{
+					trang_thai = "3-Da xu ly";
+				}			
+				String ngay_tat_toan = Utils.toHTML(rs.getString("ngay_tat_toan"));
+				String id_dulieu = Utils.toHTML(rs.getString("id_dulieu"));
+				String duyet_bc = Utils.toHTML(rs.getString("duyet_bc"));
+				
+						
+				sb.append("<row><cell>");	
+				sb.append(TRBR);
+				sb.append("</cell><cell>");
+				sb.append(phong_ban);
+				sb.append("</cell><cell>");
+				sb.append(ngay_bao_cao);
+				sb.append("</cell><cell>");		
+				sb.append(TRUSRN);
+				sb.append("</cell><cell>");
+				sb.append(DATADATE7);
+				sb.append("</cell><cell>");
+				sb.append(TRSEQ);
+				sb.append("</cell><cell>");
+				sb.append(GTACCT);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT2);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT5);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT4);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT6);
+				sb.append("</cell><cell>");
+				sb.append(TRCTYP);
+				sb.append("</cell><cell>");
+				sb.append(TRDORC);
+				sb.append("</cell><cell>");
+				sb.append(TRAMT);
+				sb.append("</cell><cell>");
+				sb.append(TREFTH);
+				sb.append("</cell><cell>");
+				sb.append(ZCHANREFNO);
+				sb.append("</cell><cell>");
+				sb.append(TRREFN);
+				sb.append("</cell><cell>");
+				sb.append(thuyet_minh);
+				sb.append("</cell><cell>");
+				sb.append(trang_thai);
+				sb.append("</cell><cell>");
+				sb.append(ngay_tat_toan);
+				sb.append("</cell><cell>");
+				sb.append(id_dulieu);
+				sb.append("</cell><cell>");
+				sb.append(duyet_bc);
+				sb.append("</cell></row>");
+				
+			}
+			
+			return "<rows><page>"+getDTO.getPage()+"</page><total>"+String.valueOf(iTotalPage)+"</total><records>"+String.valueOf(count)+"</records>"+sb.toString()+"</rows>";			
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - BM03:" + ex.getMessage());
+			return "";
+		}		
+	}	
+	
+	public Map Xuat_BC(GetDTO getDTO, String WhereCondition)
+	{
+		try
+		{
+			String tu_ngay = Utils.getTag(WhereCondition,"<TUNGAY>","</TUNGAY>");
+			String den_ngay = Utils.getTag(WhereCondition,"<DENNGAY>","</DENNGAY>");		
+			String chi_nhanh_param = Utils.getTag(WhereCondition,"<CHINHANH>","</CHINHANH>");
+			String so_ngay_ton_param = Utils.getTag(WhereCondition,"<SONGAYTON>","</SONGAYTON>");
+					
+			// Da check Null tren JSP
+			String where_sql = "";
+			String where_sql_2 = "";
+			where_sql =	where_sql + " where ngay_bao_cao >= to_date(" +"'" + tu_ngay + "','dd/mm/yyyy')" ;	
+			where_sql = where_sql + " and ngay_bao_cao <= to_date(" +"'" + den_ngay + "','dd/mm/yyyy')" ;										
+			if (!chi_nhanh_param.contains("000"))
+			{
+				if (chi_nhanh_param.contains("CN"))
+				{
+					where_sql = where_sql + " and TRBR in " 
+					+ "(select BDS_CODE from qltktg_thamso_bds where branch_code like '" + chi_nhanh_param.substring(2) + "%')" ;
+				
+					where_sql_2 = " and T1.TRBR in " 
+							+ "(select BDS_CODE from qltktg_thamso_bds where branch_code like '" + chi_nhanh_param.substring(2) + "%')" ;
+				}
+				else
+				{
+					where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+					
+					where_sql_2 =  " and T1.TRBR = '" + chi_nhanh_param + "'";
+				};
+			};	
+			where_sql = where_sql + " and " + so_ngay_ton_param + " <= ngay_bao_cao - datadate7 ";
+			where_sql = where_sql + " and "  + " 0 <= ngay_bao_cao - datadate7 ";
+			where_sql = where_sql + " and trang_thai = '2' " ;
+			
+			String sql = 				
+					" select rownum as STT , TRBR, phong_ban, " +
+					"to_char(T1.ngay_bao_cao, 'dd/mm/yyyy') ngay_bao_cao, TRUSRN, " +
+					"to_char(DATADATE7, 'dd/mm/yyyy') DATADATE7,TRSEQ,GTACCT,SEGMENT2, SEGMENT5,SEGMENT4,SEGMENT6,TRCTYP,TRDORC,TRAMT,TREFTH,thuyet_minh,trang_thai," +
+					"to_char(ngay_tat_toan, 'dd/mm/yyyy') ngay_tat_toan,id_dulieu, duyet_bc, " 
+					+ "ZCHANREFNO,TRREFN "
+					+ "from qltktg_glstrn T1 inner join ( "
+					+ "		select max(ngay_bao_cao) ngay_bao_cao, id_dulieu_goc from ( "
+					+ "		select * from qltktg_glstrn "	   
+					
+				    + where_sql + 
+				    " ) group by id_dulieu_goc ) T2 on T1.Ngay_Bao_Cao = T2.ngay_bao_cao and T1.ID_DULIEU_GOC = T2.ID_DULIEU_GOC " + where_sql_2 + " Order by TRBR, GTACCT, TRUSRN, TRCTYP, DATADATE7, TRUSRN" ;
+				    
+            SqlRowSet rs = null;
+            Map<String, List<?>> beans = new HashMap<String, List<?>>();            
+
+            rs =  DB.jdbcTemplate.queryForRowSet(sql);
+			
+            String[] doubleColumns ={}; 
+            List<Map<Object,Object>> list = new ArrayList<Map<Object,Object>>();            
+            list = Utils.getListForExprt(rs,doubleColumns);
+            beans.put("items", list);
+            return beans;
+					
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - BM03:" + ex.getMessage());
+			return null;
+		}			
+	}
+
+	
+	public static java.util.List<Map<Object, Object>> getListForExprt(ResultSet rs, String[] doubleColumns)
+    {
+      java.util.List<Map<Object, Object>> lm = new ArrayList<Map<Object,Object>>();
+        try
+        {                                                
+            int n = rs.getMetaData().getColumnCount();            
+            boolean check = false;
+            while(rs.next()){
+                Map<Object, Object> hm = new HashMap<Object, Object>();
+                for(int i = 1 ;i<=n;i++ ){
+                    String colName = rs.getMetaData().getColumnName(i).replace("'","");                    
+                    try {
+                        for(int j = 0;j<doubleColumns.length;j++){
+                            if(colName.equalsIgnoreCase(doubleColumns[j])){
+                                Double value = rs.getDouble(i);                
+                                hm.put(colName, value);
+                                check = true;
+                                break;                                
+                            }
+                        }
+                        if(!check){
+                            String value = Utils.checkNull(rs.getString(i));
+                            hm.put(colName, value);    
+                        }
+                        check = false;    
+                    } catch (Exception e) {
+                        // TODO: handle exception
+                        System.out.print("getListForExprt");
+                        //e.printStackTrace();
+
+                    }
+                    
+                }
+                lm.add(hm);
+            }
+            return lm;
+        }
+        catch (Exception ex) {
+            //Utils.writeException(ex);
+            System.out.print("getListForExprt");
+            //ex.printStackTrace();
+            return null;
+        }  
+    }
+	
+	public String stripNonValidXMLCharacters(String in) {
+        StringBuffer out = new StringBuffer(); // Used to hold the output.
+        char current; // Used to reference the current character.
+
+        if (in == null || ("".equals(in))) return ""; // vacancy test.
+        for (int i = 0; i < in.length(); i++) {
+            current = in.charAt(i); // NOTE: No IndexOutOfBoundsException caught here; it should not happen.
+            if ((current == 0x9) ||
+                (current == 0xA) ||
+                (current == 0xD) ||
+                ((current >= 0x20) && (current <= 0xD7FF)) ||
+                ((current >= 0xE000) && (current <= 0xFFFD)) ||
+                ((current >= 0x10000) && (current <= 0x10FFFF)))
+                out.append(current);
+        }
+        return out.toString();
+    }
+}
+;
+
+package com.bidv.ftp.jdbc;
+
+import java.io.*;
+import java.util.Date;
+import java.text.*;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat; 
+import java.text.DecimalFormat;
+import java.sql.CallableStatement;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Types;
+import oracle.jdbc.driver.OracleTypes;
+ 
+import com.bidv.ftp.resource.DB;
+import com.bidv.ftp.util.Constants;
+import com.bidv.ftp.util.Utils;
+
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.SqlOutParameter;
+import org.springframework.jdbc.core.SqlParameter;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.sql.DataSource;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import org.springframework.jdbc.object.StoredProcedure;
+import org.springframework.jdbc.support.rowset.SqlRowSet;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+import java.util.Random;
+
+import com.bidv.ftp.dao.BaoCaoBM06DAO;
+import com.bidv.ftp.dto.BaoCaoBM06DTO;
+import com.bidv.ftp.dto.GetDTO;
+
+import java.sql.Connection;
+
+public class BaoCaoBM06Impl implements BaoCaoBM06DAO
+{
+
+	public String TimKiem(GetDTO getDTO, String WhereCondition)
+	{
+		try
+		{
+			String ngay_giao_dich = Utils.getTag(WhereCondition,"<NGAYGIAODICH>","</NGAYGIAODICH>");			
+			String chi_nhanh_param = Utils.getTag(WhereCondition,"<CHINHANH>","</CHINHANH>");
+			String tai_khoan_param = Utils.getTag(WhereCondition,"<TAIKHOAN>","</TAIKHOAN>");
+			String ma_tien_te_param = Utils.getTag(WhereCondition,"<MATIENTE>","</MATIENTE>");
+			String loc_gd_param = Utils.getTag(WhereCondition,"<LOCGD>","</LOCGD>");
+			String so_tien_param = Utils.getTag(WhereCondition,"<SOTIEN>","</SOTIEN>");
+			
+			String ipage = getDTO.getPage();
+			String ilimit = getDTO.getLimit();
+						
+			// Check NUll tren JSP
+			String where_sql = "";
+			where_sql = where_sql + "where datadate7 = to_date(" +"'" + ngay_giao_dich + "','dd/mm/yyyy')" ;							
+			if (!chi_nhanh_param.contains("000"))
+			{
+				if (chi_nhanh_param.contains("CN"))
+				{
+					where_sql = where_sql + " and TRBR in " 
+					+ "(select BDS_CODE from qltktg_thamso_bds where branch_code like '" + chi_nhanh_param.substring(2) + "%')" ;
+				}
+				else
+				{
+					where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+				};
+			};
+				
+			if (tai_khoan_param.equals("")) {}
+			else
+			{
+					where_sql = where_sql + " and GTACCT  = " + "'" + tai_khoan_param + "'";
+			}
+			
+			if (ma_tien_te_param.equals("-1")) {}
+			else
+			{
+					where_sql = where_sql + " and TRCTYP  = " + "'" + ma_tien_te_param + "'";
+			}		
+			if (so_tien_param.equals("")) {}
+			else
+			{
+					where_sql = where_sql + " and TRAMT  = " + so_tien_param;
+			}
+			
+			DateFormat dateFormat = new SimpleDateFormat("yyyyMMddHHmmss");
+		    Date date = new Date();		    
+		    Random rn = new Random();
+	        int range = 1000;
+	        int randomNum = 1 + rn.nextInt(range);
+	       	    
+		    String key = String.valueOf(dateFormat.format(date)) + String.valueOf(randomNum);
+			
+			// Xu ly dieu kien loc GD
+		    if (loc_gd_param.equals("1"))
+			{
+					where_sql = where_sql + " and nvl(trang_thai,'999999')  != 2 " ;
+			}
+			else
+			{
+				where_sql = where_sql + " and nvl(trang_thai,'999999')  != 2 " ;
+				where_sql = where_sql + " and Id_Dulieu not in (select Id_Dulieu from TEMP_BC_BM06 where time_key = '" + key + "') " ;
+			}	
+			    
+			// Call Store
+			Connection conn = null;
+			//CallableStatement st = null;			
+			//conn = DB.getConnection();
+			conn = DB.getConnection().getDataSource().getConnection();
+			try(CallableStatement st = conn.prepareCall("{call BC_BM06(?,?,?,?,?,?,?,?,?)}")){
+				st.setString(1, ngay_giao_dich);
+			    st.setString(2, chi_nhanh_param);		     
+			    st.setString(3, ipage);
+			    st.setString(4, ilimit);		
+			    st.setString(5, where_sql);
+			    st.setString(9, key);
+			    st.registerOutParameter(6, OracleTypes.NUMBER);
+			    st.registerOutParameter(7, OracleTypes.NUMBER);
+			    st.registerOutParameter(8, OracleTypes.CURSOR);	    
+			    st.execute();
+			    
+			    int records = 0;
+				int npage = 0;
+			    ResultSet rs2 = null;
+			    
+			    npage = st.getInt(6);
+			    records = st.getInt(7);
+		        rs2 = (ResultSet) st.getObject(8);
+		        
+		        String result = "";
+		        result = GetXMLGrid(rs2,getDTO,records,npage);		    
+		        return result;
+			}  
+	        		   
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - BM06:" + ex.getMessage());
+			return "";
+		}		
+	}	
+	
+	
+	public Map Xuat_BC(GetDTO getDTO, String WhereCondition)
+	{
+		try
+		{
+			String ngay_giao_dich = Utils.getTag(WhereCondition,"<NGAYGIAODICH>","</NGAYGIAODICH>");			
+			String chi_nhanh_param = Utils.getTag(WhereCondition,"<CHINHANH>","</CHINHANH>");
+			String tai_khoan_param = Utils.getTag(WhereCondition,"<TAIKHOAN>","</TAIKHOAN>");
+			String ma_tien_te_param = Utils.getTag(WhereCondition,"<MATIENTE>","</MATIENTE>");
+			String loc_gd_param = Utils.getTag(WhereCondition,"<LOCGD>","</LOCGD>");
+			String so_tien_param = Utils.getTag(WhereCondition,"<SOTIEN>","</SOTIEN>");
+			
+			String ipage = "1";
+			String ilimit = "100000000";
+			
+			// Check NUll tren JSP
+			String where_sql = "";
+			where_sql = where_sql + "where datadate7 = to_date(" +"'" + ngay_giao_dich + "','dd/mm/yyyy')" ;							
+			if (chi_nhanh_param.contains("CN"))
+			{
+				where_sql = where_sql + " and TRBR in " 
+				+ "(select BDS_CODE from qltktg_thamso_bds where branch_code like '" + chi_nhanh_param.substring(2) + "%')" ;
+			}
+			else
+			{
+				where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+			};
+			
+			if (tai_khoan_param.equals("")) {}
+			else
+			{
+					where_sql = where_sql + " and GTACCT  = " + "'" + tai_khoan_param + "'";
+			}
+			if (ma_tien_te_param.equals("-1")) {}
+			else
+			{
+					where_sql = where_sql + " and TRCTYP  = " + "'" + ma_tien_te_param + "'";
+			}
+			if (so_tien_param.equals("")) {}
+			else
+			{
+					where_sql = where_sql + " and TRAMT  = " + so_tien_param;
+			}
+			
+			DateFormat dateFormat = new SimpleDateFormat("yyyyMMddHHmmss");
+		    Date date = new Date();
+		    
+		    Random rn = new Random();
+	        int range = 1000;
+	        int randomNum = 1 + rn.nextInt(range);
+	       	    
+		    String key = String.valueOf(dateFormat.format(date)) + String.valueOf(randomNum);
+			
+			if (loc_gd_param.equals("1"))
+			{
+					where_sql = where_sql + " and nvl(trang_thai,'999999')  != 2 " ;
+			}
+			else
+			{
+				where_sql = where_sql + " and nvl(trang_thai,'999999')  != 2 " ;
+				where_sql = where_sql + " and Id_Dulieu not in (select Id_Dulieu from TEMP_BC_BM06 where time_key = '" + key + "') " ;
+			}	
+			
+			// Call Store
+			Connection conn = null;
+			//CallableStatement st = null;			
+			//conn = DB.getConnection();
+			conn = DB.getConnection().getDataSource().getConnection();
+			try(CallableStatement st = conn.prepareCall("{call BC_BM06(?,?,?,?,?,?,?,?,?)}")){
+				st.setString(1, ngay_giao_dich);
+			    st.setString(2, chi_nhanh_param);		     
+			    st.setString(3, ipage);
+			    st.setString(4, ilimit);		
+			    st.setString(5, where_sql);
+			    st.setString(9, key);
+			    st.registerOutParameter(6, OracleTypes.NUMBER);
+			    st.registerOutParameter(7, OracleTypes.NUMBER);
+			    st.registerOutParameter(8, OracleTypes.CURSOR);	    
+			    st.execute();
+			}			
+        	String sql = 
+					
+					" select " 
+					+ "TRBR, phong_ban, to_char(ngay_bao_cao, 'dd/mm/yyyy') ngay_bao_cao, "
+					
+					+ " to_char(DATADATE7, 'dd/mm/yyyy') DATADATE7, TRUSRN, TRSEQ,GTACCT,TRCTYP,TRDORC,TRAMT,TREFTH," 
+					+ "thuyet_minh,trang_thai,to_char(ngay_tat_toan, 'dd/mm/yyyy') ngay_tat_toan,id_dulieu, duyet_bc " 
+					+" from qltktg_glstrn " 
+				    + where_sql + 
+				    " Order by TRBR,GTACCT,TRCTYP,TRUSRN " ;
+				    	
+            SqlRowSet rs = null;
+            Map<String, List<?>> beans = new HashMap<String, List<?>>();            
+
+            rs =  DB.jdbcTemplate.queryForRowSet(sql);
+			
+            String[] doubleColumns ={}; 
+            List<Map<Object,Object>> list = new ArrayList<Map<Object,Object>>();            
+            list = Utils.getListForExprt(rs,doubleColumns);
+            beans.put("items", list);
+            return beans;				
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - BM06:" + ex.getMessage());
+			return null;
+		}			
+	}
+
+	
+	public static java.util.List<Map<Object, Object>> getListForExprt(ResultSet rs, String[] doubleColumns)
+    {
+      java.util.List<Map<Object, Object>> lm = new ArrayList<Map<Object,Object>>();
+        try
+        {                                                
+            int n = rs.getMetaData().getColumnCount();            
+            boolean check = false;
+            while(rs.next()){
+                Map<Object, Object> hm = new HashMap<Object, Object>();
+                for(int i = 1 ;i<=n;i++ ){
+                    String colName = rs.getMetaData().getColumnName(i).replace("'","");                    
+                    try {
+                        for(int j = 0;j<doubleColumns.length;j++){
+                            if(colName.equalsIgnoreCase(doubleColumns[j])){
+                                Double value = rs.getDouble(i);                
+                                hm.put(colName, value);
+                                check = true;
+                                break;                                
+                            }
+                        }
+                        if(!check){
+                            String value = Utils.checkNull(rs.getString(i));
+                            hm.put(colName, value);    
+                        }
+                        check = false;    
+                    } catch (Exception e) {
+                        // TODO: handle exception
+                        System.out.print("getListForExprt");
+                        //e.printStackTrace();
+
+                    }
+                    
+                }
+                lm.add(hm);
+            }
+            return lm;
+        }
+        catch (Exception ex) {
+            //Utils.writeException(ex);
+            System.out.print("getListForExprt");
+            //ex.printStackTrace();
+            return null;
+        }      
+    }
+
+	
+	
+	public static String GetXMLGrid(ResultSet rs,GetDTO dto, int SoLuong, int SoTrang)
+    {
+       try
+       {
+              String temp = "";
+              String TREFTH = "";
+              String trang_thai = "";
+    	   
+    	      StringBuilder sb=new StringBuilder();
+              StringBuilder sb1=new StringBuilder();
+              
+              if(rs==null) return "";
+              else
+              {
+                     while(rs.next())
+                     {
+                            sb1.append("<row>");
+                            for (int i=1;  i<=rs.getMetaData().getColumnCount();i++)
+                            {
+                              temp = rs.getMetaData().getColumnName(i);
+                              
+                              if ( temp.equals("TREFTH") )
+                              {
+                            	  TREFTH = Utils.toHTML(rs.getString(rs.getMetaData().getColumnName(i)));
+                            	  TREFTH = stripNonValidXMLCharacters(TREFTH);
+                            	  sb1.append("<cell>" + TREFTH + "</cell>");
+                              }  
+                              
+                              if ( temp.equals("trang_thai") )
+                              {
+                            	  trang_thai = Utils.toHTML(rs.getString(rs.getMetaData().getColumnName(i)));
+                            	  if (trang_thai.equals("1") )
+                  				  {
+                  					trang_thai = "1-Cho duyet";
+                  				  }	
+                  				  if (trang_thai.equals("2") )
+                  				  {
+                  					trang_thai = "2-Da duyet";
+                  				  }	
+                  				  if (trang_thai.equals("3") )
+                  				  {
+                  					trang_thai = "3-Da xu ly";
+                  				  }
+                            	  sb1.append("<cell>" + trang_thai + "</cell>");
+                              }
+                              
+                              if ( ( !temp.equals("TREFTH") ) && ( !temp.equals("trang_thai") ) )
+                              {
+                            	  sb1.append("<cell>" + Utils.toHTML(rs.getString(rs.getMetaData().getColumnName(i))) + "</cell>");
+                              }                  	  
+                            }
+                            sb1.append("</row>");                           
+                     }
+                     sb=new StringBuilder();
+                     
+                     //sb.append(Constants.XML_HEADER);
+                     //if(SoLuong<0) SoLuong=rs.getRow();
+                     
+                     sb.append("<rows><page>"+dto.getPage()+"</page><total>"+String.valueOf(SoTrang)+"</total><records>"+String.valueOf(SoLuong)+"</records>");
+                           
+                     sb.append(sb1.toString());
+                     sb.append("</rows>");
+                     return sb.toString();
+              }
+       }
+       catch (Exception ex) 
+       {                   
+                     return Constants.RETURN_FAIL + ex.getMessage();
+       }
+              
+    }
+
+	public static String stripNonValidXMLCharacters(String in) 
+	{
+        StringBuffer out = new StringBuffer(); // Used to hold the output.
+        char current; // Used to reference the current character.
+
+        if (in == null || ("".equals(in))) return ""; // vacancy test.
+        for (int i = 0; i < in.length(); i++) {
+            current = in.charAt(i); // NOTE: No IndexOutOfBoundsException caught here; it should not happen.
+            if ((current == 0x9) ||
+                (current == 0xA) ||
+                (current == 0xD) ||
+                ((current >= 0x20) && (current <= 0xD7FF)) ||
+                ((current >= 0xE000) && (current <= 0xFFFD)) ||
+                ((current >= 0x10000) && (current <= 0x10FFFF)))
+                out.append(current);
+        }
+        return out.toString();
+    }
+}
+;
+package com.bidv.ftp.jdbc;
+
+import java.io.*;
+import java.util.Date;
+import java.text.*;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.text.DecimalFormat;
+import java.sql.CallableStatement;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Types;
+
+import com.bidv.ftp.resource.DB;
+import com.bidv.ftp.util.Constants;
+import com.bidv.ftp.util.Utils;
+
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.SqlOutParameter;
+import org.springframework.jdbc.core.SqlParameter;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.sql.DataSource;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import org.springframework.jdbc.object.StoredProcedure;
+import org.springframework.jdbc.support.rowset.SqlRowSet;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+import java.util.Random;
+
+import com.bidv.ftp.dao.DOICHIEUGIAODICHDAO;
+import com.bidv.ftp.dto.DOICHIEUGIAODICHDTO;
+import com.bidv.ftp.dto.GetDTO;
+
+public class DOICHIEUGIAODICHImpl implements DOICHIEUGIAODICHDAO {
+
+	public String TimKiem(GetDTO getDTO, String WhereConditon) {
+		try {
+			String ngay_giao_dich = Utils.getTag(WhereConditon, "<DATE>",
+					"</DATE>");
+			String user_param = Utils
+					.getTag(WhereConditon, "<USER>", "</USER>");
+			String user_lienquan_param = Utils.getTag(WhereConditon,
+					"<USER_LIENQUAN>", "</USER_LIENQUAN>");
+			String so_chung_tu_param = Utils.getTag(WhereConditon,
+					"<SOCHUNGTU>", "</SOCHUNGTU>");
+
+			String tai_khoan_param = Utils.getTag(WhereConditon, "<TAIKHOAN>",
+					"</TAIKHOAN>");
+			String so_tien_param = Utils.getTag(WhereConditon, "<SOTIEN>",
+					"</SOTIEN>");
+			String so_tien_min_param = Utils.getTag(WhereConditon,
+					"<SOTIEN_MIN>", "</SOTIEN_MIN>");
+			String so_tien_max_param = Utils.getTag(WhereConditon,
+					"<SOTIEN_MAX>", "</SOTIEN_MAX>");
+
+			String chi_nhanh_param = Utils.getTag(WhereConditon, "<CHINHANH>",
+					"</CHINHANH>");
+			String phong_ban_param = Utils.getTag(WhereConditon, "<PHONGBAN>",
+					"</PHONGBAN>");
+			String ma_tien_te_param = Utils.getTag(WhereConditon, "<MATIENTE>",
+					"</MATIENTE>");
+			String trang_thai_param = Utils.getTag(WhereConditon,
+					"<TRANGTHAI>", "</TRANGTHAI>");
+			
+
+			// Ngay giao dich + CN da check null o JSP
+			String where_sql = "";
+			where_sql = "where ngay_bao_cao = to_date(" + "'" + ngay_giao_dich
+					+ "','dd/mm/yyyy')";
+			where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+
+			// user
+			if (user_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and trim(trusrn) = " + "'"
+						+ user_param + "'";
+			}
+			if (user_lienquan_param.equals("")) {
+			} else {
+				where_sql = where_sql
+						+ " and (trim(TRUSRN) in (select trim(ma_user) from qludtt_usm_ds_user where ma_cb ='"
+						+ user_lienquan_param + "')";
+				where_sql = where_sql + " or trim(TRUSRN) = '"
+						+ user_lienquan_param + "') ";
+				// and (trim(TRUSRN) in (select trim(ma_user) from
+				// qludtt_usm_ds_user where ma_cb ='29301') or trim(TRUSRN) =
+				// '29301')
+			}
+			// so chung tu
+			if (so_chung_tu_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and trim(trseq) = " + "'"
+						+ so_chung_tu_param + "'";
+			}
+
+			// tai khoan
+			if (tai_khoan_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and trim(GTACCT) = " + "'"
+						+ tai_khoan_param + "'";
+			}
+			if (so_tien_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and TRAMT = " + so_tien_param;
+			}
+			if (so_tien_min_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and TRAMT >= " + so_tien_min_param;
+			}
+			if (so_tien_max_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and TRAMT <= " + so_tien_max_param;
+			}
+
+			// phong ban
+			if (phong_ban_param.equals("-1")) {
+			} else {
+				where_sql = where_sql + " and SEGMENT2 = '" + phong_ban_param
+						+ "'"; // phong_ban
+			}
+			// ma tien te
+			if (ma_tien_te_param.equals("-1")) {
+			} else {
+				where_sql = where_sql + " and trim(TRCTYP) = " + "'"
+						+ ma_tien_te_param + "'";
+			}
+			
+			// trang thai
+			if (trang_thai_param.equals("1")) {
+				where_sql = where_sql
+						+ " and TRTRTE <> 1"
+						+ " and (trang_thai <> '2' or nvl(trang_thai,'999') = 999)";
+			}
+			if (trang_thai_param.equals("2")) {
+				where_sql = where_sql + " and TRTRTE = 1 ";
+			}
+			if (trang_thai_param.equals("3")) {
+
+			}
+
+			// NO
+			where_sql = where_sql + " and TRDORC = 'D' ";
+
+			int ipage = Integer.parseInt(getDTO.getPage());
+			int ilimit = Integer.parseInt(getDTO.getLimit());
+			String Start = String.valueOf((ipage - 1) * ilimit + 1);
+			String End = String.valueOf(ipage * ilimit);
+			int count = 0;
+			// mệnh đề where được dùng để phân trang.
+			SqlRowSet rs;
+			int iTotalPage;
+			if (getDTO.getSidx().equals("STT"))
+				getDTO.setSidx("STT");
+			String count_sql = "select count(*) from qltktg_glstrn "
+					+ where_sql;
+			count = DB.jdbcTemplate.queryForInt(count_sql);
+			iTotalPage = count / ilimit;
+			int acCount = iTotalPage * ilimit;
+			if (acCount < count)
+				iTotalPage++;
+
+			String where = " where STT between " + Start + " and " + End;
+
+			String sql = "select * from"
+
+					// + " (select rownum as STT,"
+					+ " (select row_number() over (order by datadate7 asc)  as STT,"
+					+ "TRBR, phong_ban, to_char(datadate7, 'dd/mm/yyyy') ngay_bao_cao,"
+
+					+ "TRUSRN, TRSEQ,GTACCT,SEGMENT2, SEGMENT5,SEGMENT4,SEGMENT6,"
+					+ "TRCTYP,TRDORC,TRAMT,TREFTH,ZCHANREFNO,TRREFN,thuyet_minh,id_dulieu, TRTRTE "
+					+ " from qltktg_glstrn " + where_sql
+					+ " Order by datadate7,phong_ban, TRUSRN, trang_thai )"
+
+					+ where + " Order by STT";
+
+			rs = DB.jdbcTemplate.queryForRowSet(sql);
+
+			StringBuilder sb = new StringBuilder();
+
+			while (rs.next()) {
+				String TRBR = Utils.toHTML(rs.getString("TRBR"));
+				String phong_ban = Utils.toHTML(rs.getString("phong_ban"));
+				String ngay_bao_cao = Utils
+						.toHTML(rs.getString("ngay_bao_cao"));
+				String TRUSRN = Utils.toHTML(rs.getString("TRUSRN"));
+				String TRSEQ = Utils.toHTML(rs.getString("TRSEQ"));
+				String GTACCT = Utils.toHTML(rs.getString("GTACCT"));
+				String SEGMENT2 = Utils.toHTML(rs.getString("SEGMENT2"));
+				String SEGMENT5 = Utils.toHTML(rs.getString("SEGMENT5"));
+				String SEGMENT4 = Utils.toHTML(rs.getString("SEGMENT4"));
+
+				String SEGMENT6 = Utils.toHTML(rs.getString("SEGMENT6"));
+				String TRCTYP = Utils.toHTML(rs.getString("TRCTYP"));
+				String TRDORC = Utils.toHTML(rs.getString("TRDORC"));
+				String TRAMT = Utils.toHTML(rs.getString("TRAMT"));
+
+				String TREFTH = Utils.toHTML(Utils.checkNull(rs
+						.getString("TREFTH")));
+				TREFTH = stripNonValidXMLCharacters(TREFTH);
+				String ZCHANREFNO = Utils.toHTML(rs.getString("ZCHANREFNO"));
+				String TRREFN = Utils.toHTML(rs.getString("TRREFN"));
+
+				String thuyet_minh = Utils.toHTML(Utils.checkNull(rs
+						.getString("thuyet_minh")));
+				thuyet_minh = stripNonValidXMLCharacters(thuyet_minh);
+
+				String id_dulieu = Utils.toHTML(rs.getString("id_dulieu"));
+				String doi_chieu = Utils.toHTML(rs.getString("TRTRTE"));
+
+				if (doi_chieu.equals("0")) {
+					doi_chieu = "";
+				}
+				if (doi_chieu.equals("1")) {
+					doi_chieu = "X";
+				}
+
+				sb.append("<row><cell>");
+				sb.append(TRBR);
+				sb.append("</cell><cell>");
+				sb.append(phong_ban);
+				sb.append("</cell><cell>");
+				sb.append(ngay_bao_cao);
+				sb.append("</cell><cell>");
+				sb.append(TRUSRN);
+				sb.append("</cell><cell>");
+				sb.append(TRSEQ);
+				sb.append("</cell><cell>");
+				sb.append(GTACCT);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT2);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT5);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT4);
+				sb.append("</cell><cell>");
+
+				sb.append(SEGMENT6);
+				sb.append("</cell><cell>");
+				sb.append(TRCTYP);
+				sb.append("</cell><cell>");
+				sb.append(TRDORC);
+				sb.append("</cell><cell>");
+				sb.append(TRAMT);
+				sb.append("</cell><cell>");
+				sb.append(TREFTH);
+				sb.append("</cell><cell>");
+				sb.append(ZCHANREFNO);
+				sb.append("</cell><cell>");
+				sb.append(TRREFN);
+				sb.append("</cell><cell>");
+				sb.append(thuyet_minh);
+				sb.append("</cell><cell>");
+				sb.append(id_dulieu);
+				sb.append("</cell><cell>");
+				sb.append(doi_chieu);
+				sb.append("</cell></row>");
+
+			}
+
+			return "<rows><page>" + getDTO.getPage() + "</page><total>"
+					+ String.valueOf(iTotalPage) + "</total><records>"
+					+ String.valueOf(count) + "</records>" + sb.toString()
+					+ "</rows>";
+		} catch (Exception ex) {
+			System.out
+					.println("Error - Doi chieu giao dich:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+	}
+
+	public String TimKiem_Luoi2(GetDTO getDTO, String WhereCondition) {
+		try {
+			String ngay_giao_dich = Utils.getTag(WhereCondition, "<DATE>",
+					"</DATE>");
+			String user_param = Utils.getTag(WhereCondition, "<USER>",
+					"</USER>");
+			String user_lienquan_param = Utils.getTag(WhereCondition,
+					"<USER_LIENQUAN>", "</USER_LIENQUAN>");
+			String so_chung_tu_param = Utils.getTag(WhereCondition,
+					"<SOCHUNGTU>", "</SOCHUNGTU>");
+
+			String tai_khoan_param = Utils.getTag(WhereCondition, "<TAIKHOAN>",
+					"</TAIKHOAN>");
+			String so_tien_param = Utils.getTag(WhereCondition, "<SOTIEN>",
+					"</SOTIEN>");
+			String so_tien_min_param = Utils.getTag(WhereCondition,
+					"<SOTIEN_MIN>", "</SOTIEN_MIN>");
+			String so_tien_max_param = Utils.getTag(WhereCondition,
+					"<SOTIEN_MAX>", "</SOTIEN_MAX>");
+
+			String chi_nhanh_param = Utils.getTag(WhereCondition, "<CHINHANH>",
+					"</CHINHANH>");
+			String phong_ban_param = Utils.getTag(WhereCondition, "<PHONGBAN>",
+					"</PHONGBAN>");
+			String ma_tien_te_param = Utils.getTag(WhereCondition,
+					"<MATIENTE>", "</MATIENTE>");
+			String trang_thai_param = Utils.getTag(WhereCondition,
+					"<TRANGTHAI>", "</TRANGTHAI>");
+			
+
+			// Ngay giao dich + CN da check null o JSP
+			String where_sql = "";
+			where_sql = "where ngay_bao_cao = to_date(" + "'" + ngay_giao_dich
+					+ "','dd/mm/yyyy')";
+			where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+
+			// user
+			if (user_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and trim(trusrn) = " + "'"
+						+ user_param + "'";
+			}
+			if (user_lienquan_param.equals("")) {
+			} else {
+				where_sql = where_sql
+						+ " and (trim(TRUSRN) in (select trim(ma_user) from qludtt_usm_ds_user where ma_cb ='"
+						+ user_lienquan_param + "')";
+				where_sql = where_sql + " or trim(TRUSRN) = '"
+						+ user_lienquan_param + "') ";
+				// and (trim(TRUSRN) in (select trim(ma_user) from
+				// qludtt_usm_ds_user where ma_cb ='29301') or trim(TRUSRN) =
+				// '29301')
+			}
+			// so chung tu
+			if (so_chung_tu_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and trim(trseq) = " + "'"
+						+ so_chung_tu_param + "'";
+			}
+
+			// tai khoan
+			if (tai_khoan_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and trim(GTACCT) = " + "'"
+						+ tai_khoan_param + "'";
+			}
+			if (so_tien_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and TRAMT = " + so_tien_param;
+			}
+			if (so_tien_min_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and TRAMT >= " + so_tien_min_param;
+			}
+			if (so_tien_max_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and TRAMT <= " + so_tien_max_param;
+			}
+
+			// phong ban
+			if (phong_ban_param.equals("-1")) {
+			} else {
+				where_sql = where_sql + " and SEGMENT2 = '" + phong_ban_param
+						+ "'";
+			}
+			
+			// ma tien te
+			if (ma_tien_te_param.equals("-1")) {
+			} else {
+				where_sql = where_sql + " and trim(TRCTYP) = " + "'"
+						+ ma_tien_te_param + "'";
+			}
+			// trang thai
+			if (trang_thai_param.equals("1")) {
+				where_sql = where_sql
+						+ " and TRTRTE <> 1"
+						+ " and (trang_thai <> '2' or nvl(trang_thai,'999') = 999)";
+			}
+			if (trang_thai_param.equals("2")) {
+				where_sql = where_sql + " and TRTRTE = 1 ";
+			}
+			if (trang_thai_param.equals("3")) {
+
+			}
+
+			// NO
+			where_sql = where_sql + " and TRDORC = 'C' ";
+
+			int ipage = Integer.parseInt(getDTO.getPage());
+			int ilimit = Integer.parseInt(getDTO.getLimit());
+			String Start = String.valueOf((ipage - 1) * ilimit + 1);
+			String End = String.valueOf(ipage * ilimit);
+			int count = 0;
+			// mệnh đề where được dùng để phân trang.
+			SqlRowSet rs;
+			int iTotalPage;
+			if (getDTO.getSidx().equals("STT"))
+				getDTO.setSidx("STT");
+			String count_sql = "select count(*) from qltktg_glstrn "
+					+ where_sql;
+			count = DB.jdbcTemplate.queryForInt(count_sql);
+			iTotalPage = count / ilimit;
+			int acCount = iTotalPage * ilimit;
+			if (acCount < count)
+				iTotalPage++;
+
+			String where = " where STT between " + Start + " and " + End;
+
+			String sql = "select * from"
+
+					// + " (select rownum as STT,"
+					+ " (select row_number() over (order by datadate7 asc)  as STT,"
+					+ "TRBR, phong_ban, to_char(datadate7, 'dd/mm/yyyy') ngay_bao_cao, "
+
+					+ "TRUSRN, TRSEQ,GTACCT,SEGMENT2, SEGMENT5,SEGMENT4,SEGMENT6,"
+					+ "TRCTYP,TRDORC,TRAMT,TREFTH,ZCHANREFNO,TRREFN,thuyet_minh,id_dulieu, TRTRTE "
+					+ " from qltktg_glstrn " + where_sql
+					+ " Order by phong_ban, TRUSRN, trang_thai )"
+
+					+ where + " Order by STT";
+
+			rs = DB.jdbcTemplate.queryForRowSet(sql);
+
+			StringBuilder sb = new StringBuilder();
+
+			while (rs.next()) {
+				String TRBR = Utils.toHTML(rs.getString("TRBR"));
+				String phong_ban = Utils.toHTML(rs.getString("phong_ban"));
+				String ngay_bao_cao = Utils
+						.toHTML(rs.getString("ngay_bao_cao"));
+				String TRUSRN = Utils.toHTML(rs.getString("TRUSRN"));
+				String TRSEQ = Utils.toHTML(rs.getString("TRSEQ"));
+				String GTACCT = Utils.toHTML(rs.getString("GTACCT"));
+				String SEGMENT2 = Utils.toHTML(rs.getString("SEGMENT2"));
+				String SEGMENT5 = Utils.toHTML(rs.getString("SEGMENT5"));
+				String SEGMENT4 = Utils.toHTML(rs.getString("SEGMENT4"));
+
+				String SEGMENT6 = Utils.toHTML(rs.getString("SEGMENT6"));
+				String TRCTYP = Utils.toHTML(rs.getString("TRCTYP"));
+				String TRDORC = Utils.toHTML(rs.getString("TRDORC"));
+				String TRAMT = Utils.toHTML(rs.getString("TRAMT"));
+
+				String TREFTH = Utils.toHTML(Utils.checkNull(rs
+						.getString("TREFTH")));
+				TREFTH = stripNonValidXMLCharacters(TREFTH);
+				String ZCHANREFNO = Utils.toHTML(rs.getString("ZCHANREFNO"));
+				String TRREFN = Utils.toHTML(rs.getString("TRREFN"));
+				String thuyet_minh = Utils.toHTML(Utils.checkNull(rs
+						.getString("thuyet_minh")));
+				thuyet_minh = stripNonValidXMLCharacters(thuyet_minh);
+
+				String id_dulieu = Utils.toHTML(rs.getString("id_dulieu"));
+				String doi_chieu = Utils.toHTML(rs.getString("TRTRTE"));
+
+				if (doi_chieu.equals("0")) {
+					doi_chieu = "";
+				}
+				if (doi_chieu.equals("1")) {
+					doi_chieu = "X";
+				}
+
+				sb.append("<row><cell>");
+				sb.append(TRBR);
+				sb.append("</cell><cell>");
+				sb.append(phong_ban);
+				sb.append("</cell><cell>");
+				sb.append(ngay_bao_cao);
+				sb.append("</cell><cell>");
+				sb.append(TRUSRN);
+				sb.append("</cell><cell>");
+				sb.append(TRSEQ);
+				sb.append("</cell><cell>");
+				sb.append(GTACCT);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT2);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT5);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT4);
+				sb.append("</cell><cell>");
+
+				sb.append(SEGMENT6);
+				sb.append("</cell><cell>");
+				sb.append(TRCTYP);
+				sb.append("</cell><cell>");
+				sb.append(TRDORC);
+				sb.append("</cell><cell>");
+				sb.append(TRAMT);
+				sb.append("</cell><cell>");
+				sb.append(TREFTH);
+				sb.append("</cell><cell>");
+				sb.append(ZCHANREFNO);
+				sb.append("</cell><cell>");
+				sb.append(TRREFN);
+				sb.append("</cell><cell>");
+				sb.append(thuyet_minh);
+				sb.append("</cell><cell>");
+				sb.append(id_dulieu);
+				sb.append("</cell><cell>");
+				sb.append(doi_chieu);
+				sb.append("</cell></row>");
+
+			}
+
+			return "<rows><page>" + getDTO.getPage() + "</page><total>"
+					+ String.valueOf(iTotalPage) + "</total><records>"
+					+ String.valueOf(count) + "</records>" + sb.toString()
+					+ "</rows>";
+		} catch (Exception ex) {
+			System.out
+					.println("Error - Doi chieu giao dich:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+	}
+
+	public String doi_chieu_thu_cong(String WhereConditon, String UserName,
+			String UserBranch, String ipAddress) {
+		try {
+			String id = WhereConditon;
+			id = id.substring(1);
+			id = "(" + id + ")";
+
+			String sql = "update qltktg_glstrn SET TRTRTE= 1 where id_dulieu in "
+					+ id;
+
+			int res;
+			res = DB.jdbcTemplate.update(sql);
+
+			sql = sql.replace("'", "''");
+			LogsImpl.WriteLogs_QLTKTG(UserName, ipAddress, UserBranch, "9", sql);
+			return "Success";
+		} catch (Exception ex) {
+			System.out.println("Error - Doi chieu thu cong:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+
+	}
+
+	public String huy_doi_chieu_thu_cong(String WhereConditon, String UserName,
+			String UserBranch, String ipAddress) {
+		try {
+			String id = WhereConditon;
+			id = id.substring(1);
+			id = "(" + id + ")";
+
+			String sql = "update qltktg_glstrn SET TRTRTE= 0 where id_dulieu in "
+					+ id;
+
+			int res;
+			res = DB.jdbcTemplate.update(sql);
+
+			sql = sql.replace("'", "''");
+			LogsImpl.WriteLogs_QLTKTG(UserName, ipAddress, UserBranch, "9", sql);
+			return "Success";
+		} catch (Exception ex) {
+			System.out.println("Error - Huy Doi chieu thu cong:"
+					+ ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+
+	}
+
+	public String doi_chieu_giao_dich(String WhereConditon, String UserName,
+			String UserBranch, String ipAddress) {
+		try {
+			String ngay_giao_dich = Utils.getTag(WhereConditon, "<DATE>",
+					"</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereConditon, "<CHINHANH>",
+					"</CHINHANH>");
+			
+			/*
+			 * <option value="1">-1-ALL</option> <option value="2">-2-Bỏ GD có
+			 * Nợ = Có</option>
+			 */
+			DateFormat dateFormat = new SimpleDateFormat("yyyyMMddHHmmss");
+			Date date = new Date();
+			Random rn = new Random();
+			int range = 1000;
+			int randomNum = 1 + rn.nextInt(range);
+
+			String key = String.valueOf(dateFormat.format(date))
+					+ String.valueOf(randomNum);
+
+			Connection conn = null;
+			// CallableStatement st = null;
+			conn = DB.getConnection().getDataSource().getConnection();
+			try (CallableStatement st = conn
+					.prepareCall("{call BC_BM06_NHAP_GD(?,?,?)}")) {
+				st.setString(1, ngay_giao_dich);
+				st.setString(2, chi_nhanh_param);
+				st.setString(3, key);
+				st.execute();
+			}
+
+			String sql = "Update qltktg_glstrn set TRTRTE = 1 "
+					+ " where Id_Dulieu in (select distinct Id_Dulieu from TEMP_BC_BM06 where trbr = '"
+					+ chi_nhanh_param + "' and ngay_bao_cao = to_date(" + "'"
+					+ ngay_giao_dich + "','dd/mm/yyyy')" + "  and time_key = '"
+					+ key + "') ";
+
+			int res;
+			res = DB.jdbcTemplate.update(sql);
+
+			sql = sql.replace("'", "''");
+			LogsImpl.WriteLogs_QLTKTG(UserName, ipAddress, UserBranch, "9", sql);
+			return "Success";
+		} catch (Exception ex) {
+			System.out
+					.println("Error - Doi chieu giao dich:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+
+	}
+
+	public String reset_doi_chieu(String WhereConditon, String UserName,
+			String UserBranch, String ipAddress) {
+		try {
+			String ngay_giao_dich = Utils.getTag(WhereConditon, "<DATE>",
+					"</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereConditon, "<CHINHANH>",
+					"</CHINHANH>");
+
+			String sql = "Update qltktg_glstrn set TRTRTE = 0 "
+					+ " where ngay_bao_cao = to_date(" + "'" + ngay_giao_dich
+					+ "','dd/mm/yyyy')" + "  and TRBR = '" + chi_nhanh_param
+					+ "'";
+
+			int res;
+			res = DB.jdbcTemplate.update(sql);
+
+			sql = sql.replace("'", "''");
+			LogsImpl.WriteLogs_QLTKTG(UserName, ipAddress, UserBranch, "9", sql);
+			return "Success";
+		} catch (Exception ex) {
+			System.out.println("Error - Reset doi chieu:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+
+	}
+
+	public String XuatExcel(GetDTO getDTO, String WhereConditon) {
+		try {
+			String ngay_giao_dich = Utils.getTag(WhereConditon, "<DATE>",
+					"</DATE>");
+			String user_param = Utils
+					.getTag(WhereConditon, "<USER>", "</USER>");
+			String user_lienquan_param = Utils.getTag(WhereConditon,
+					"<USER_LIENQUAN>", "</USER_LIENQUAN>");
+			String so_chung_tu_param = Utils.getTag(WhereConditon,
+					"<SOCHUNGTU>", "</SOCHUNGTU>");
+
+			String tai_khoan_param = Utils.getTag(WhereConditon, "<TAIKHOAN>",
+					"</TAIKHOAN>");
+			String so_tien_param = Utils.getTag(WhereConditon, "<SOTIEN>",
+					"</SOTIEN>");
+			String so_tien_min_param = Utils.getTag(WhereConditon,
+					"<SOTIEN_MIN>", "</SOTIEN_MIN>");
+			String so_tien_max_param = Utils.getTag(WhereConditon,
+					"<SOTIEN_MAX>", "</SOTIEN_MAX>");
+
+			String chi_nhanh_param = Utils.getTag(WhereConditon, "<CHINHANH>",
+					"</CHINHANH>");
+			String phong_ban_param = Utils.getTag(WhereConditon, "<PHONGBAN>",
+					"</PHONGBAN>");
+			String ma_tien_te_param = Utils.getTag(WhereConditon, "<MATIENTE>",
+					"</MATIENTE>");
+			String trang_thai_param = Utils.getTag(WhereConditon,
+					"<TRANGTHAI>", "</TRANGTHAI>");
+
+			// Ngay giao dich + CN da check null o JSP
+			String where_sql = "";
+			where_sql = "where ngay_bao_cao = to_date(" + "'" + ngay_giao_dich
+					+ "','dd/mm/yyyy')";
+			where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+
+			// user
+			if (user_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and trim(trusrn) = " + "'"
+						+ user_param + "'";
+			}
+			if (user_lienquan_param.equals("")) {
+			} else {
+				where_sql = where_sql
+						+ " and (trim(TRUSRN) in (select trim(ma_user) from qludtt_usm_ds_user where ma_cb ='"
+						+ user_lienquan_param + "')";
+				where_sql = where_sql + " or trim(TRUSRN) = '"
+						+ user_lienquan_param + "') ";
+				// and (trim(TRUSRN) in (select trim(ma_user) from
+				// qludtt_usm_ds_user where ma_cb ='29301') or trim(TRUSRN) =
+				// '29301')
+			}
+			// so chung tu
+			if (so_chung_tu_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and trim(trseq) = " + "'"
+						+ so_chung_tu_param + "'";
+			}
+
+			// tai khoan
+			if (tai_khoan_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and trim(GTACCT) = " + "'"
+						+ tai_khoan_param + "'";
+			}
+			if (so_tien_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and TRAMT = " + so_tien_param;
+			}
+			if (so_tien_min_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and TRAMT >= " + so_tien_min_param;
+			}
+			if (so_tien_max_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and TRAMT <= " + so_tien_max_param;
+			}
+
+			// phong ban
+			if (phong_ban_param.equals("-1")) {
+			} else {
+				where_sql = where_sql + " and phong_ban = '" + phong_ban_param
+						+ "'";
+			}
+			// ma tien te
+			if (ma_tien_te_param.equals("-1")) {
+			} else {
+				where_sql = where_sql + " and trim(TRCTYP) = " + "'"
+						+ ma_tien_te_param + "'";
+			}
+			// trang thai
+			if (trang_thai_param.equals("1")) {
+				where_sql = where_sql
+						+ " and TRTRTE <> 1"
+						+ " and (trang_thai <> '2' or nvl(trang_thai,'999') = 999)";
+			}
+			if (trang_thai_param.equals("2")) {
+				where_sql = where_sql + " and TRTRTE = 1 ";
+			}
+			if (trang_thai_param.equals("3")) {
+
+			}
+
+			//
+			String sql = "Select "
+					+ "TRBR as CHINHANH, "
+					+ "phong_ban as PHONGBAN, "
+					+ " to_char(ngay_bao_cao,'dd/mm/yyyy') as NGAY_BAO_CAO, "
+					+ "trusrn as USER_HACHTOAN, "
+					+ "TRSEQ as SO_CHUNG_TU , "
+					+ "GTACCT as SO_TAI_KHOAN, "
+					+ "SEGMENT2 as MA_PHONG_BAN, SEGMENT5 AS MA_SANPHAM,SEGMENT4 AS MA_DVLQ,SEGMENT6 AS MA_KHACH_HANG,"
+					+ " TRCTYP as MA_TIEN_TE, " + "TRDORC as NO_CO, "
+					+ "TRAMT as SO_TIEN, "
+					+ " case when TRTRTE = 1 then 'X' else '' end DOI_CHIEU, "
+					+ "TREFTH as NOI_DUNG,"
+					+ "ZCHANREFNO AS SO_REF_KENH,TRREFN AS REF_TRUNG_GIAN"
+
+					+ " from qltktg_glstrn " + where_sql
+					+ " Order by phong_ban,trusrn, GTACCT, TRCTYP,TRAMT";
+
+			return sql;
+		}
+
+		catch (Exception ex) {
+			System.out.println("Error - Export giao dich:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+	}
+
+	public static java.util.List<Map<Object, Object>> getListForExprt(
+			ResultSet rs, String[] doubleColumns) {
+		java.util.List<Map<Object, Object>> lm = new ArrayList<Map<Object, Object>>();
+		try {
+			int n = rs.getMetaData().getColumnCount();
+			boolean check = false;
+			while (rs.next()) {
+				Map<Object, Object> hm = new HashMap<Object, Object>();
+				for (int i = 1; i <= n; i++) {
+					String colName = rs.getMetaData().getColumnName(i)
+							.replace("'", "");
+					try {
+						for (int j = 0; j < doubleColumns.length; j++) {
+							if (colName.equalsIgnoreCase(doubleColumns[j])) {
+								Double value = rs.getDouble(i);
+								hm.put(colName, value);
+								check = true;
+								break;
+							}
+						}
+						if (!check) {
+							String value = Utils.checkNull(rs.getString(i));
+							hm.put(colName, value);
+						}
+						check = false;
+					} catch (Exception e) {
+						// TODO: handle exception
+						System.out.print("getListForExprt");
+						// e.printStackTrace();
+
+					}
+
+				}
+				lm.add(hm);
+			}
+			return lm;
+		} catch (Exception ex) {
+			// Utils.writeException(ex);
+			System.out.print("getListForExprt");
+			// ex.printStackTrace();
+			return null;
+		}
+
+	}
+
+	public String stripNonValidXMLCharacters(String in) {
+		StringBuffer out = new StringBuffer(); // Used to hold the output.
+		char current; // Used to reference the current character.
+
+		if (in == null || ("".equals(in)))
+			return ""; // vacancy test.
+		for (int i = 0; i < in.length(); i++) {
+			current = in.charAt(i); // NOTE: No IndexOutOfBoundsException caught
+									// here; it should not happen.
+			if ((current == 0x9) || (current == 0xA) || (current == 0xD)
+					|| ((current >= 0x20) && (current <= 0xD7FF))
+					|| ((current >= 0xE000) && (current <= 0xFFFD))
+					|| ((current >= 0x10000) && (current <= 0x10FFFF)))
+				out.append(current);
+		}
+		return out.toString();
+	}
+
+}
+;
+package com.bidv.ftp.jdbc;
+
+import java.io.*;
+import java.util.Date;
+import java.text.*;
+import java.util.Calendar;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat; 
+import java.text.DecimalFormat;
+import java.sql.CallableStatement;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Types;
+import java.util.Random;
+import java.util.Vector;
+ 
+
+import com.bidv.ftp.resource.DB;
+import com.bidv.ftp.util.Constants;
+import com.bidv.ftp.util.Utils;
+
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.SqlOutParameter;
+import org.springframework.jdbc.core.SqlParameter;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.sql.DataSource;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import org.springframework.jdbc.object.StoredProcedure;
+import org.springframework.jdbc.support.rowset.SqlRowSet;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+
+import com.bidv.ftp.dao.KIEMSOATTHUYETMINHDAO;
+import com.bidv.ftp.dto.KIEMSOATTHUYETMINHDTO;
+import com.bidv.ftp.dto.GetDTO;
+
+public class KIEMSOATTHUYETMINHImpl implements KIEMSOATTHUYETMINHDAO
+{
+
+	
+	
+	public String TimKiem(GetDTO getDTO, String WhereConditon)
+	{
+		try
+		{
+			String ngay_giao_dich = Utils.getTag(WhereConditon,"<DATE>","</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereConditon,"<CHINHANH>","</CHINHANH>");			
+			//String user_param = Utils.getTag(WhereConditon,"<USER>","</USER>");
+			//String so_chung_tu_param = Utils.getTag(WhereConditon,"<SOCHUNGTU>","</SOCHUNGTU>");			
+			String tai_khoan_param = Utils.getTag(WhereConditon,"<TAIKHOAN>","</TAIKHOAN>");
+			String ma_tien_te_param = Utils.getTag(WhereConditon,"<MATIENTE>","</MATIENTE>");			
+			String trang_thai_param = Utils.getTag(WhereConditon,"<TRANGTHAI>","</TRANGTHAI>");
+			//String phong_ban_param = Utils.getTag(WhereConditon,"<PHONGBAN>","</PHONGBAN>");
+			
+			// Check null o JSP			
+			String where_sql = "";
+			where_sql = "where ngay_bao_cao = to_date(" +"'" + ngay_giao_dich + "','dd/mm/yyyy')" ;			
+			//where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+			if (!chi_nhanh_param.contains("000"))
+			{
+				if (chi_nhanh_param.contains("CN"))
+				{
+					where_sql = where_sql + " and TRBR in " 
+					+ "(select BDS_CODE from qltktg_thamso_bds where branch_code like '" + chi_nhanh_param.substring(2) + "%')" ;
+				}
+				else
+				{
+					where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+				};
+			};
+			
+			
+			/*if (user_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trusrn) = " + "'" + user_param + "'"; 
+			}
+			if (so_chung_tu_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trseq) = " + "'" + so_chung_tu_param + "'" ; 
+			}*/
+			if (tai_khoan_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(GTACCT) = " + "'" + tai_khoan_param + "'" ; 
+			}
+			if (ma_tien_te_param.equals("-1")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(TRCTYP) = " + "'" + ma_tien_te_param + "'" ; 
+			}
+			if (trang_thai_param.equals("-1")) 
+			{
+				where_sql = where_sql + " and trang_thai in (1,2,3) ";
+			}
+			else
+			{	
+				where_sql = where_sql + " and trang_thai like '" + trang_thai_param + "%'";
+			}
+			/*if (phong_ban_param.equals("-1")) {}
+			else
+			{	
+				    where_sql = where_sql + " and phong_ban = '" + phong_ban_param + "'";
+			}*/	
+			
+			int ipage = Integer.parseInt(getDTO.getPage());
+			int ilimit = Integer.parseInt(getDTO.getLimit());
+			String Start =  String.valueOf((ipage-1)*ilimit + 1);
+			String End = String.valueOf(ipage*ilimit);		
+			int count = 0;
+			SqlRowSet rs ;
+			int iTotalPage;			
+			if (getDTO.getSidx().equals("STT"))	getDTO.setSidx("STT");
+			String count_sql = "select count(*) from qltktg_glstrn " + where_sql;	
+			count = DB.jdbcTemplate.queryForInt(count_sql);
+			iTotalPage = count/ilimit;
+			int acCount = iTotalPage * ilimit;
+			if (acCount<count) iTotalPage++ ;			
+			String where = " where STT between " + Start + " and " + End;	
+			
+			String sql = 
+				"select * from" 			   
+				+" (select rownum as STT," 
+				+ "TRBR, phong_ban, to_char(ngay_bao_cao, 'dd/mm/yyyy') ngay_bao_cao, "		
+				+ "TRUSRN, to_char(DATADATE7, 'dd/mm/yyyy') DATADATE7,TRSEQ,GTACCT,SEGMENT2, SEGMENT4,SEGMENT5,SEGMENT6,TRCTYP,TRDORC,TRAMT,TREFTH,ZCHANREFNO,TRREFN,thuyet_minh,trang_thai,to_char(ngay_tat_toan, 'dd/mm/yyyy') ngay_tat_toan,id_dulieu, duyet_bc, user_nhap, user_duyet " 
+				+" from qltktg_glstrn " 
+			    + where_sql + 
+			    " Order by phong_ban, TRUSRN, trang_thai )" 		    
+			    + where + " Order by STT";			
+			
+			rs = DB.jdbcTemplate.queryForRowSet(sql);
+					
+			StringBuilder sb = new StringBuilder();
+			while (rs.next()) 
+			{
+         		String TRBR = Utils.toHTML(rs.getString("TRBR"));
+				String phong_ban = Utils.toHTML(rs.getString("phong_ban"));
+				String ngay_bao_cao = Utils.toHTML(rs.getString("ngay_bao_cao"));						
+				String TRUSRN = Utils.toHTML(rs.getString("TRUSRN"));				
+				String DATADATE7 = Utils.toHTML(rs.getString("DATADATE7"));										
+				String TRSEQ = Utils.toHTML(rs.getString("TRSEQ"));	
+				String GTACCT = Utils.toHTML(rs.getString("GTACCT"));
+				String SEGMENT2 = Utils.toHTML(rs.getString("SEGMENT2"));
+				String SEGMENT4 = Utils.toHTML(rs.getString("SEGMENT4"));
+				String SEGMENT5 = Utils.toHTML(rs.getString("SEGMENT5"));
+				String SEGMENT6 = Utils.toHTML(rs.getString("SEGMENT6"));
+				String TRCTYP = Utils.toHTML(rs.getString("TRCTYP"));
+				String TRDORC = Utils.toHTML(rs.getString("TRDORC"));
+				String TRAMT = Utils.toHTML(rs.getString("TRAMT"));
+				//
+				String TREFTH = Utils.toHTML( Utils.checkNull(rs.getString("TREFTH")) );	
+				TREFTH = stripNonValidXMLCharacters(TREFTH);
+				//
+				String ZCHANREFNO = Utils.toHTML(rs.getString("ZCHANREFNO"));
+				String TRREFN = Utils.toHTML(rs.getString("TRREFN"));
+				String thuyet_minh = Utils.toHTML(rs.getString("thuyet_minh"));
+				String trang_thai = Utils.toHTML(rs.getString("trang_thai"));
+				if (trang_thai.equals("1") )
+				{
+					trang_thai = "1-Cho duyet";
+				}	
+				if (trang_thai.equals("2") )
+				{
+					trang_thai = "2-Da duyet";
+				}	
+				if (trang_thai.equals("3") )
+				{
+					trang_thai = "3-Da xu ly";
+				}
+				String ngay_tat_toan = Utils.toHTML(rs.getString("ngay_tat_toan"));
+				String id_dulieu = Utils.toHTML(rs.getString("id_dulieu"));
+				String duyet_bc = Utils.toHTML(rs.getString("duyet_bc"));
+				String user_nhap = Utils.toHTML(rs.getString("user_nhap"));
+				String user_duyet = Utils.toHTML(rs.getString("user_duyet"));
+			
+				sb.append("<row><cell>");	
+				sb.append(TRBR);
+				sb.append("</cell><cell>");
+				sb.append(phong_ban);
+				sb.append("</cell><cell>");
+				sb.append(ngay_bao_cao);
+				sb.append("</cell><cell>");		
+				sb.append(TRUSRN);
+				sb.append("</cell><cell>");
+				sb.append(DATADATE7);
+				sb.append("</cell><cell>");
+				sb.append(TRSEQ);
+				sb.append("</cell><cell>");
+				sb.append(GTACCT);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT2);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT4);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT5);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT6);
+				sb.append("</cell><cell>");
+				sb.append(TRCTYP);
+				sb.append("</cell><cell>");
+				sb.append(TRDORC);
+				sb.append("</cell><cell>");
+				sb.append(TRAMT);
+				sb.append("</cell><cell>");
+				sb.append(TREFTH);
+				sb.append("</cell><cell>");
+				sb.append(ZCHANREFNO);
+				sb.append("</cell><cell>");
+				sb.append(TRREFN);
+				sb.append("</cell><cell>");
+				sb.append(thuyet_minh);
+				sb.append("</cell><cell>");
+				sb.append(trang_thai);
+				sb.append("</cell><cell>");
+				sb.append(ngay_tat_toan);
+				sb.append("</cell><cell>");
+				sb.append(id_dulieu);
+				sb.append("</cell><cell>");
+				sb.append(duyet_bc);
+				sb.append("</cell><cell>");
+				sb.append(user_nhap);
+				sb.append("</cell><cell>");
+				sb.append(user_duyet);
+				sb.append("</cell></row>");					
+			}		
+			return "<rows><page>"+getDTO.getPage()+"</page><total>"+String.valueOf(iTotalPage)+"</total><records>"+String.valueOf(count)+"</records>"+sb.toString()+"</rows>";			
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Kiem soat thuyet minh:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}		
+	}
+		
+	public String XuatExcel(GetDTO getDTO, String WhereConditon)
+	{
+		try
+		{
+			String ngay_giao_dich = Utils.getTag(WhereConditon,"<DATE>","</DATE>");
+			//String user_param = Utils.getTag(WhereConditon,"<USER>","</USER>");
+			
+			//String so_chung_tu_param = Utils.getTag(WhereConditon,"<SOCHUNGTU>","</SOCHUNGTU>");
+			String tai_khoan_param = Utils.getTag(WhereConditon,"<TAIKHOAN>","</TAIKHOAN>");
+			String trang_thai_param = Utils.getTag(WhereConditon,"<TRANGTHAI>","</TRANGTHAI>");
+			
+			
+			String chi_nhanh_param = Utils.getTag(WhereConditon,"<CHINHANH>","</CHINHANH>");			
+			//String phong_ban_param = Utils.getTag(WhereConditon,"<PHONGBAN>","</PHONGBAN>");
+			String ma_tien_te_param = Utils.getTag(WhereConditon,"<MATIENTE>","</MATIENTE>");			
+			
+			
+			// Check null o JSP			
+			String where_sql = "";
+			where_sql = "where ngay_bao_cao = to_date(" +"'" + ngay_giao_dich + "','dd/mm/yyyy')" ;			
+			//where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";			
+			if (!chi_nhanh_param.contains("000"))
+			{
+				if (chi_nhanh_param.contains("CN"))
+				{
+					where_sql = where_sql + " and TRBR in " 
+					+ "(select BDS_CODE from qltktg_thamso_bds where branch_code like '" + chi_nhanh_param.substring(2) + "%')" ;
+				}
+				else
+				{
+					where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+				};
+			};
+			
+			
+			
+			/*if (user_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trusrn) = " + "'" + user_param + "'"; 
+			}
+			if (so_chung_tu_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trseq) = " + "'" + so_chung_tu_param + "'" ; 
+			}*/
+			if (tai_khoan_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(GTACCT) = " + "'" + tai_khoan_param + "'" ; 
+			}
+			if (ma_tien_te_param.equals("-1")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(TRCTYP) = " + "'" + ma_tien_te_param + "'" ; 
+			}
+			/*if (phong_ban_param.equals("-1")) {}
+			else
+			{	
+				    where_sql = where_sql + " and phong_ban = '" + phong_ban_param + "'";
+			}*/	
+			if (trang_thai_param.equals("-1")) 
+			{
+				where_sql = where_sql + " and trang_thai in (1,2,3) ";
+			}
+			else
+			{	
+				where_sql = where_sql + " and trang_thai like '" + trang_thai_param + "%'";
+			}
+			
+
+			String sql = 
+				"Select " 
+			    + "TRBR as CHINHANH, " +
+			    "phong_ban as PHONGBAN, " +
+			    " to_char(ngay_bao_cao,'dd/mm/yyyy') ngay_bao_cao , "
+			    + "trusrn as USER_HACHTOAN, " +
+			    " to_char(DATADATE7,'dd/mm/yyyy') as NGAYGD, " +
+			    "TRSEQ as SO_CHUNG_TU , " +
+			    "GTACCT as SO_TAI_KHOAN, " +
+			    "SEGMENT2 as MaPhongban , SEGMENT5 as MaSanpham,SEGMENT4 as MaDVLQ,SEGMENT6 as MaKH," +
+			    " TRCTYP as MA_TIEN_TE, " +
+			    "TRDORC as NO_CO, " +
+			    "TRAMT as SO_TIEN, " +
+			    "TREFTH as NOI_DUNG," 
+				+ "THUYET_MINH, " +
+				"trang_thai, " +
+				"trunc(ngay_tat_toan) NGAY_TAT_TOAN " 
+				+ " ,duyet_BC, user_nhap, user_duyet, ID_DULIEU AUTO_ID "
+				+" from qltktg_glstrn " 
+			    + where_sql +     
+			    " Order by TRBR, phong_ban, DATADATE7,trusrn, GTACCT, TRCTYP" ;
+			   
+			return sql;
+							
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Xuat Excel - Kiem soat Thuyet Minh:" + ex.getMessage());
+			return "";
+		}		
+	}
+	
+	public String stripNonValidXMLCharacters(String in) {
+        StringBuffer out = new StringBuffer(); // Used to hold the output.
+        char current; // Used to reference the current character.
+
+        if (in == null || ("".equals(in))) return ""; // vacancy test.
+        for (int i = 0; i < in.length(); i++) {
+            current = in.charAt(i); // NOTE: No IndexOutOfBoundsException caught here; it should not happen.
+            if ((current == 0x9) ||
+                (current == 0xA) ||
+                (current == 0xD) ||
+                ((current >= 0x20) && (current <= 0xD7FF)) ||
+                ((current >= 0xE000) && (current <= 0xFFFD)) ||
+                ((current >= 0x10000) && (current <= 0x10FFFF)))
+                out.append(current);
+        }
+        return out.toString();
+    }
+}
+;
+package com.bidv.ftp.jdbc;
+
+import java.net.InetAddress;
+import java.sql.CallableStatement;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Random;
+
+import oracle.jdbc.driver.OracleTypes;
+
+import java.util.Map;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.rowset.SqlRowSet;
+//
+
+import java.io.*;
+import java.util.Date;
+import java.text.*;
+import java.util.Calendar;
+
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.text.DecimalFormat;
+
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Types;
+
+import com.bidv.ftp.resource.DB;
+import com.bidv.ftp.util.Constants;
+import com.bidv.ftp.util.Utils;
+
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.SqlOutParameter;
+import org.springframework.jdbc.core.SqlParameter;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.sql.DataSource;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import org.springframework.jdbc.object.StoredProcedure;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+
+import com.bidv.ftp.dao.NhapMoiGiaoDichDAO;
+import com.bidv.ftp.dto.NhapMoiGiaoDichDTO;
+import com.bidv.ftp.dto.GetDTO;
+import com.bidv.ftp.dto.NhapThuyetMinhDTO;
+
+public class NhapMoiGiaoDichImpl implements NhapMoiGiaoDichDAO {
+	public String TimKiem(GetDTO getDTO, String WhereConditon) {
+		try {
+			String ngay_giao_dich = Utils.getTag(WhereConditon, "<DATE>",
+					"</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereConditon, "<CHINHANH>",
+					"</CHINHANH>");
+
+			String user_param = Utils
+					.getTag(WhereConditon, "<USER>", "</USER>");
+			String so_chung_tu_param = Utils.getTag(WhereConditon,
+					"<SOCHUNGTU>", "</SOCHUNGTU>");
+
+			String tai_khoan_param = Utils.getTag(WhereConditon, "<TAIKHOAN>",
+					"</TAIKHOAN>");
+			String ma_tien_te_param = Utils.getTag(WhereConditon, "<MATIENTE>",
+					"</MATIENTE>");
+
+			String phong_ban_param = Utils.getTag(WhereConditon, "<PHONGBAN>",
+					"</PHONGBAN>");
+
+			// Ngay giao dich + CN
+			// Check null o JSP
+			String where_sql = "";
+			where_sql = "where datadate7 = to_date(" + "'" + ngay_giao_dich
+					+ "','dd/mm/yyyy')";
+			where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+
+			// user
+			if (user_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and trim(trusrn) = " + "'"
+						+ user_param + "'";
+			}
+			// so chung tu
+			if (so_chung_tu_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and trim(trseq) = " + "'"
+						+ so_chung_tu_param + "'";
+			}
+
+			// tai khoan
+			if (tai_khoan_param.equals("")) {
+			} else {
+				where_sql = where_sql + " and GTACCT = " + "'"
+						+ tai_khoan_param + "'";
+			}
+			// ma tien te
+			if (ma_tien_te_param.equals("-1")) {
+			} else {
+				where_sql = where_sql + " and trim(TRCTYP) = " + "'"
+						+ ma_tien_te_param + "'";
+			}
+
+			// phong ban
+			if (phong_ban_param.equals("-1")) {
+			} else {
+				where_sql = where_sql + " and phong_ban = '" + phong_ban_param
+						+ "'";
+			}
+
+			// Man hinh NHAP MOI THUYET MINH chi hien thi trang thai = null hoac
+			// 1-Cho duyet
+			where_sql = where_sql
+					+ " and (trang_thai = '1' or  nvl(trang_thai,'999') = 999 ) ";
+
+			int ipage = Integer.parseInt(getDTO.getPage());
+			int ilimit = Integer.parseInt(getDTO.getLimit());
+			String Start = String.valueOf((ipage - 1) * ilimit + 1);
+			String End = String.valueOf(ipage * ilimit);
+			int count = 0;
+			// mệnh đề where được dùng để phân trang.
+			SqlRowSet rs;
+			int iTotalPage;
+			if (getDTO.getSidx().equals("STT"))
+				getDTO.setSidx("STT");
+			String count_sql = "select count(*) from qltktg_glstrn "
+					+ where_sql;
+			count = DB.jdbcTemplate.queryForInt(count_sql);
+			iTotalPage = count / ilimit;
+			int acCount = iTotalPage * ilimit;
+			if (acCount < count)
+				iTotalPage++;
+
+			String where = " where STT between " + Start + " and " + End;
+
+			String sql = "select * from"
+
+					+ " (select rownum as STT,"
+					+ "TRBR, phong_ban, to_char(ngay_bao_cao, 'dd/mm/yyyy') ngay_bao_cao, "
+
+					+ "TRUSRN, to_char(DATADATE7, 'dd/mm/yyyy') DATADATE7,TRSEQ,GTACCT,SEGMENT2, SEGMENT4,SEGMENT5,SEGMENT6," 
+					+ "TRCTYP,TRDORC,TRAMT,"
+					+ " replace(replace( replace(TREFTH, CHR(10), ''), CHR(13), ''), CHR(09), '') TREFTH,ZCHANREFNO,TRREFN,"
+					+ " thuyet_minh,trang_thai,to_char(ngay_tat_toan, 'dd/mm/yyyy') ngay_tat_toan,id_dulieu, duyet_bc"
+					+ " from qltktg_glstrn " + where_sql
+					+ " Order by phong_ban, TRUSRN, trang_thai )"
+
+					+ where + " Order by STT";
+
+			rs = DB.jdbcTemplate.queryForRowSet(sql);
+
+			StringBuilder sb = new StringBuilder();
+
+			while (rs.next()) {
+				String TRBR = Utils
+						.toHTML(Utils.checkNull(rs.getString("TRBR")));
+				String phong_ban = Utils.toHTML(rs.getString("phong_ban"));
+				String ngay_bao_cao = Utils
+						.toHTML(rs.getString("ngay_bao_cao"));
+				/*
+				 * if (!ngay_bao_cao.equals(" ") ) { //2016-10-06 00:00:00.0
+				 * String yyyy0 = ngay_bao_cao.substring(0,4); String mm0 =
+				 * ngay_bao_cao.substring(5,7); String dd0 =
+				 * ngay_bao_cao.substring(8,10); ngay_bao_cao = dd0 + "/" + mm0
+				 * + "/" + yyyy0; ; }
+				 */
+
+				String TRUSRN = Utils.toHTML(rs.getString("TRUSRN"));
+
+				String DATADATE7 = Utils.toHTML(rs.getString("DATADATE7"));
+				/*
+				 * if (!DATADATE7.equals(" ") ) { //2016-10-06 00:00:00.0 String
+				 * yyyy = DATADATE7.substring(0,4); String mm =
+				 * DATADATE7.substring(5,7); String dd =
+				 * DATADATE7.substring(8,10); DATADATE7 = dd + "/" + mm + "/" +
+				 * yyyy; }
+				 */
+
+				String TRSEQ = Utils.toHTML(rs.getString("TRSEQ"));
+				String GTACCT = Utils.toHTML(rs.getString("GTACCT"));
+				String SEGMENT2 = Utils.toHTML(rs.getString("SEGMENT2"));
+				String SEGMENT4 = Utils.toHTML(rs.getString("SEGMENT4"));
+				String SEGMENT5 = Utils.toHTML(rs.getString("SEGMENT5"));
+				String SEGMENT6 = Utils.toHTML(rs.getString("SEGMENT6"));
+				String TRCTYP = Utils.toHTML(rs.getString("TRCTYP"));
+				String TRDORC = Utils.toHTML(rs.getString("TRDORC"));
+				String TRAMT = Utils.toHTML(rs.getString("TRAMT"));
+				String TREFTH = Utils.toHTML(Utils.checkNull(rs
+						.getString("TREFTH")));
+				String ZCHANREFNO = Utils.toHTML(rs.getString("ZCHANREFNO"));
+				String TRREFN = Utils.toHTML(rs.getString("TRREFN"));
+				String thuyet_minh = Utils.toHTML(rs.getString("thuyet_minh"));
+				String trang_thai = Utils.toHTML(rs.getString("trang_thai"));
+				if (trang_thai.equals("1")) {
+					trang_thai = "1-Cho duyet";
+				}
+
+				String ngay_tat_toan = Utils.toHTML(rs
+						.getString("ngay_tat_toan"));
+				/*
+				 * if (!ngay_tat_toan.equals(" ") ) { //2016-10-06 00:00:00.0
+				 * String yyyy1 = ngay_tat_toan.substring(0,4); String mm1 =
+				 * ngay_tat_toan.substring(5,7); String dd1 =
+				 * ngay_tat_toan.substring(8,10); ngay_tat_toan = dd1 + "/" +
+				 * mm1 + "/" + yyyy1; }
+				 */
+
+				String id_dulieu = Utils.toHTML(rs.getString("id_dulieu"));
+				String duyet_bc = Utils.toHTML(rs.getString("duyet_bc"));
+				
+				
+
+				sb.append("<row><cell>");
+				sb.append(TRBR);
+				sb.append("</cell><cell>");
+				sb.append(phong_ban);
+				sb.append("</cell><cell>");
+				sb.append(ngay_bao_cao);
+				sb.append("</cell><cell>");
+				sb.append(TRUSRN);
+				sb.append("</cell><cell>");
+				sb.append(DATADATE7);
+				sb.append("</cell><cell>");
+				sb.append(TRSEQ);
+				sb.append("</cell><cell>");
+				sb.append(GTACCT);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT2);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT4);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT5);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT6);
+				sb.append("</cell><cell>");
+				sb.append(TRCTYP);
+				sb.append("</cell><cell>");
+				sb.append(TRDORC);
+				sb.append("</cell><cell>");
+				sb.append(TRAMT);
+				sb.append("</cell><cell>");
+				sb.append(Utils.toHTML(Utils.checkNull(TREFTH.trim()
+						.replaceAll("[-+.^:,]", ""))));
+				// sb.append("");
+				sb.append("</cell><cell>");
+				sb.append(ZCHANREFNO);
+				sb.append("</cell><cell>");
+				sb.append(TRREFN);
+				sb.append("</cell><cell>");
+				sb.append(thuyet_minh);
+				sb.append("</cell><cell>");
+				sb.append(trang_thai);
+				sb.append("</cell><cell>");
+				sb.append(ngay_tat_toan);
+				sb.append("</cell><cell>");
+				sb.append(id_dulieu);
+				sb.append("</cell><cell>");
+				sb.append(duyet_bc);
+				sb.append("</cell></row>");
+				
+			}
+			String a = "<rows><page>" + getDTO.getPage() + "</page><total>"
+					+ String.valueOf(iTotalPage) + "</total><records>"
+					+ String.valueOf(count) + "</records>" + sb.toString()
+					+ "</rows>";
+			String xmlString = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" + a;
+
+			DocumentBuilderFactory factory = DocumentBuilderFactory
+					.newInstance();
+			try {
+				// Disable external entity resolution
+				factory.setFeature(
+						"http://apache.org/xml/features/disallow-doctype-decl",
+						true);
+				factory.setFeature(
+						"http://xml.org/sax/features/external-general-entities",
+						false);
+				factory.setFeature(
+						"http://xml.org/sax/features/external-parameter-entities",
+						false);
+				factory.setFeature(
+						"http://javax.xml.XMLConstants/feature/secure-processing",
+						true);
+
+				DocumentBuilder builder = factory.newDocumentBuilder();
+				Document document = builder.parse(new InputSource(
+						new StringReader(xmlString)));
+			} catch (Exception e) {
+			}
+			return "<rows><page>" + getDTO.getPage() + "</page><total>"
+					+ String.valueOf(iTotalPage) + "</total><records>"
+					+ String.valueOf(count) + "</records>" + sb.toString()
+					+ "</rows>";
+		} catch (Exception ex) {
+			System.out.println("Error - Nhap Thuyet Minh:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+	}
+
+	public String NhapMoi(GetDTO getDTO, String WhereConditon, String UserName,
+			String UserBranch, String ipAddress) {
+		String txtBrn_2 = Utils.getTag(WhereConditon, "<CHINHANH>", 
+				"</CHINHANH>");
+		String txtPB_2 = Utils.getTag(WhereConditon, "<PHONGBAN>",
+				"</PHONGBAN>");
+		String txtSP_2 = Utils.getTag(WhereConditon, "<MASP>",
+				"</MASP>");
+		String txtDV_2 = Utils.getTag(WhereConditon, "<MADVLQ>",
+				"</MADVLQ>");
+		String txtKH_2 = Utils.getTag(WhereConditon, "<MAKH>",
+				"</MAKH>");
+		String ngaygiaodich_nhapmoi = Utils.getTag(WhereConditon,
+				"<NGAYGIAODICH>", "</NGAYGIAODICH>");
+		String ngaybaocao_nhapmoi = Utils.getTag(WhereConditon, "<NGAYBAOCAO>",
+				"</NGAYBAOCAO>");
+		String user_new = Utils.getTag(WhereConditon, "<USER>", "</USER>");
+		String so_chung_tu_new = Utils.getTag(WhereConditon, "<SOCT>",
+				"</SOCT>");
+		String txtTK = Utils.getTag(WhereConditon, "<TAIKHOAN>", "</TAIKHOAN>");
+		String txtTT_2 = Utils.getTag(WhereConditon, "<MATT>", "</MATT>");
+		String no_co_new = Utils.getTag(WhereConditon, "<NOCO>", "</NOCO>");
+		String so_tien_new = Utils.getTag(WhereConditon, "<SOTIEN>",
+				"</SOTIEN>");
+		String noi_dung_new = Utils.getTag(WhereConditon, "<NOIDUNG>",
+				"</NOIDUNG>");
+		String thuyet_minh_new = Utils.getTag(WhereConditon, "<THUYETMINH>",
+				"</THUYETMINH>");
+
+		try {
+			String sql = "insert into qltktg_glstrn"
+					+ "(TRBR, PHONG_BAN,segment2,segment5,segment4,segment6, DATADATE7, TRUSRN, TRSEQ, "
+					+ " GTACCT, TRCTYP, TRDORC, TRAMT, TREFTH, THUYET_MINH , NGAY_BAO_CAO, DUYET_BC, FLAG_BATCH, TRTRTE ) "
+					+ "SELECT"
+
+					+ "'"
+					+ txtBrn_2
+					+ "' TRBR,"
+					+ "'"
+					+ txtPB_2
+					+ "' PHONG_BAN,"
+					+ "'"
+					+ txtPB_2
+					+ "' segment2,"
+					+ "'"
+					+ txtSP_2
+					+ "' segment5,"
+					+ "'"
+					+ txtDV_2
+					+ "' segment4,"
+					+ "'"
+					+ txtKH_2
+					+ "' segment6,"
+					+ "to_date('"
+					+ ngaygiaodich_nhapmoi
+					+ "','dd/mm/yyyy') DATADATE7,"
+					+ "'"
+					+ user_new
+					+ "' TRUSRN,"
+					+ "'"
+					+ so_chung_tu_new
+					+ "' TRSEQ,"
+					+ "'"
+					+ txtTK
+					+ "' GTACCT,"
+					+ "'"
+					+ txtTT_2
+					+ "' TRCTYP,"
+					+ "'"
+					+ no_co_new
+					+ "' TRDORC,"
+					+ ""
+					+ so_tien_new
+					+ " TRAMT,"
+					+ "'"
+					+ noi_dung_new
+					+ "' TREFTH,"
+					+ "'"
+					+ thuyet_minh_new
+					+ "' THUYET_MINH,"
+					+ "to_date('"
+					+ ngaybaocao_nhapmoi
+					+ "','dd/mm/yyyy') NGAY_BAO_CAO,"
+					+ "'N','N',0"
+					+ " FROM DUAL ";
+
+			int res;
+			res = DB.jdbcTemplate.update(sql);
+
+			sql = sql.replace("'", "''");
+			LogsImpl.WriteLogs_QLTKTG(UserName, ipAddress, UserBranch, "10",
+					sql);
+
+			return "success";
+		} catch (Exception ex) {
+	/*		System.out.println("Error - Nhap moi thuyet minh:"
+					+ ex.getMessage());
+			return "Error: " + ex.getMessage();*/
+		}
+		return "success";
+	}
+
+	public String XuatExcel(GetDTO getDTO, String WhereConditon) {
+		try {
+			String sql = "Select TRBR , PHONG_BAN, "
+					+ "to_char(DATADATE7,'yyyymmdd') YYYYMMDD_NGAY_GIAO_DICH, "
+					+ "to_char(NGAY_BAO_CAO,'yyyymmdd') YYYYMMDD_NGAY_BAO_CAO, "
+					+ "TRUSRN, TRSEQ , GTACCT ,"
+					+ " TRCTYP , TRDORC , TRAMT , TREFTH, thuyet_minh, USER_NHAP "
+					+ " from qltktg_glstrn where id_dulieu = '31353393' ";
+			return sql;
+		} catch (Exception ex) {
+			System.out.println("Error - Xuat File mau - Nhap moi Giao Dich"
+					+ ex.getMessage());
+			return "";
+		}
+	}
+
+	public String NhapExcel(ArrayList<NhapMoiGiaoDichDTO> arr, String UserName) {
+		Connection conn = null;
+		// PreparedStatement pst = null;
+		try {
+			// Danh dau la GD duoc nhap vao Excel
+			DateFormat dateFormat = new SimpleDateFormat("dd/MM/yyyy/HH:mm");
+			Date date = new Date();
+			String flag = String.valueOf(dateFormat.format(date))
+					+ "-GD NHAP EXCEL";
+
+			NhapMoiGiaoDichDTO dto;
+			CallableStatement st = null;
+			String result = "";
+			ResultSet rs = null;
+
+			conn = DB.getConnection().getDataSource().getConnection();
+			String Sql = "INSERT INTO  qltktg_glstrn "
+					+ "(TRTRTE, TRBR, PHONG_BAN,TRUSRN, TRSEQ, GTACCT,TRCTYP, "
+					+ " TRDORC, TRAMT, TREFTH, thuyet_minh, USER_NHAP, "
+					+ " DUYET_BC, FLAG_BATCH, trgrp, DATADATE7, NGAY_BAO_CAO) "
+					+ " VALUES "
+					+ " (0, ?,?,?,?,?, ?,?,?,?,?, ?,?,?,?, to_date(?,'YYYYMMDD'),to_date(?,'YYYYMMDD')  ) ";
+
+			try (PreparedStatement pst = conn.prepareStatement(Sql)) {
+				for (int i = 0; i < arr.size(); i++) {
+					dto = arr.get(i);
+					pst.setString(1, dto.getTRBR());
+					pst.setString(2, dto.getPHONG_BAN());
+					pst.setString(3, dto.getTRUSRN());
+					pst.setString(4, dto.getTRSEQ());
+					pst.setString(5, dto.getGTACCT());
+					pst.setString(6, dto.getTRCTYP());
+					pst.setString(7, dto.getTRDORC());
+					// pst.setString(8, dto.getTRAMT());
+					String TRAMT = dto.getTRAMT();
+					TRAMT = TRAMT.replace(",", "");
+					pst.setString(8, TRAMT);
+
+					pst.setString(9, dto.getTREFTH());
+					pst.setString(10, dto.getTHUYET_MINH());
+					pst.setString(11, dto.getUSER_NHAP());
+					pst.setString(12, "N");
+					pst.setString(13, "N");
+					pst.setString(14, flag);
+					pst.setString(15, dto.getDATADATE7());
+					pst.setString(16, dto.getNGAY_BAO_CAO());
+
+					pst.addBatch();
+				}
+
+				pst.executeBatch();
+				LogsImpl.WriteLogs_QLTKTG(UserName, "", "", "13", "");
+				conn.close();
+			}
+			return "success";
+		} catch (Exception ex) {
+			// ex.printStackTrace();
+			return Constants.RETURN_FAIL + ex.getMessage();
+		}
+	}
+
+}
+;
+package com.bidv.ftp.jdbc;
+
+import java.io.*;
+import java.util.Date;
+import java.text.*;
+import java.util.Calendar;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat; 
+import java.text.DecimalFormat;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Types;
+ 
+import com.bidv.ftp.resource.DB;
+import com.bidv.ftp.util.Constants;
+import com.bidv.ftp.util.Utils;
+
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.SqlOutParameter;
+import org.springframework.jdbc.core.SqlParameter;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.sql.DataSource;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import org.springframework.jdbc.object.StoredProcedure;
+import org.springframework.jdbc.support.rowset.SqlRowSet;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+
+import com.bidv.ftp.dao.NhapThuyetMinh2DAO;
+import com.bidv.ftp.dto.NhapThuyetMinh2DTO;
+import com.bidv.ftp.dto.GetDTO;
+
+public class NhapThuyetMinh2Impl implements NhapThuyetMinh2DAO
+{	
+	public String TimKiem(GetDTO getDTO, String WhereConditon)
+	{
+		try
+		{
+			String ngay_bao_cao_param = Utils.getTag(WhereConditon,"<DATE>","</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereConditon,"<CHINHANH>","</CHINHANH>");			
+			String user_param = Utils.getTag(WhereConditon,"<USER>","</USER>");
+			String so_chung_tu_param = Utils.getTag(WhereConditon,"<SOCHUNGTU>","</SOCHUNGTU>");		
+			String tai_khoan_param = Utils.getTag(WhereConditon,"<TAIKHOAN>","</TAIKHOAN>");
+			String ma_tien_te_param = Utils.getTag(WhereConditon,"<MATIENTE>","</MATIENTE>");	
+			String phong_ban_param = Utils.getTag(WhereConditon,"<PHONGBAN>","</PHONGBAN>");
+			
+			
+			// Check null o JSP			
+			String where_sql = "";
+			where_sql = "where ngay_bao_cao = to_date(" +"'" + ngay_bao_cao_param + "','dd/mm/yyyy')" ;			
+			where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+		
+			if (user_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trusrn) = " + "'" + user_param + "'"; 
+			}
+			if (so_chung_tu_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trseq) = " + "'" + so_chung_tu_param + "'" ; 
+			}			
+			if (tai_khoan_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(GTACCT) = " + "'" + tai_khoan_param + "'" ; 
+			}
+			if (ma_tien_te_param.equals("-1")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(TRCTYP) = " + "'" + ma_tien_te_param + "'" ; 
+			}
+			if (phong_ban_param.equals("-1")) {}
+			else
+			{	
+				    where_sql = where_sql + " and SEGMENT2 = '" + phong_ban_param + "'";
+			}	//phong_ban
+			
+			// Man hinh CHUYEN DOI TRANG THAI chi hien thi trang thai 3-Da xu ly
+			where_sql = where_sql + " and (trang_thai = '3') " ;
+ 				
+			int ipage = Integer.parseInt(getDTO.getPage());
+			int ilimit = Integer.parseInt(getDTO.getLimit());
+			String Start =  String.valueOf((ipage-1)*ilimit + 1);
+			String End = String.valueOf(ipage*ilimit);		
+			int count = 0;
+			SqlRowSet rs ;
+			int iTotalPage;			
+			if (getDTO.getSidx().equals("STT"))	getDTO.setSidx("STT");
+			String count_sql = "select count(*) from qltktg_glstrn " + where_sql;	
+			count = DB.jdbcTemplate.queryForInt(count_sql);
+			iTotalPage = count/ilimit;
+			int acCount = iTotalPage * ilimit;
+			if (acCount<count) iTotalPage++ ;
+			String where = " where STT between " + Start + " and " + End;	
+			
+			String sql = 
+				"select * from" 		   
+				+" (select rownum as STT," 
+				+ "TRBR, phong_ban, to_char(ngay_bao_cao, 'dd/mm/yyyy') ngay_bao_cao, "
+				+ "TRUSRN, to_char(DATADATE7, 'dd/mm/yyyy') DATADATE7,TRSEQ,GTACCT,TRCTYP,TRDORC,TRAMT,TREFTH,thuyet_minh,trang_thai,to_char(ngay_tat_toan, 'dd/mm/yyyy') ngay_tat_toan,id_dulieu, duyet_bc, user_nhap, user_duyet " 
+				
+				+" from qltktg_glstrn " 
+			    + where_sql + 
+			    " Order by phong_ban, TRUSRN, trang_thai )" 
+			    + where + " Order by STT";			
+			
+			rs = DB.jdbcTemplate.queryForRowSet(sql);
+					
+			StringBuilder sb = new StringBuilder();
+			while (rs.next()) 
+			{
+         		String TRBR = Utils.toHTML(rs.getString("TRBR"));
+				String phong_ban = Utils.toHTML(rs.getString("phong_ban"));
+				String ngay_bao_cao = Utils.toHTML(rs.getString("ngay_bao_cao"));
+				String TRUSRN = Utils.toHTML(rs.getString("TRUSRN"));			
+				String DATADATE7 = Utils.toHTML(rs.getString("DATADATE7"));							
+				String TRSEQ = Utils.toHTML(rs.getString("TRSEQ"));	
+				String GTACCT = Utils.toHTML(rs.getString("GTACCT"));
+				String TRCTYP = Utils.toHTML(rs.getString("TRCTYP"));
+				String TRDORC = Utils.toHTML(rs.getString("TRDORC"));
+				String TRAMT = Utils.toHTML(rs.getString("TRAMT"));
+				//
+				String TREFTH = Utils.toHTML( Utils.checkNull(rs.getString("TREFTH")) );	
+				TREFTH = stripNonValidXMLCharacters(TREFTH);
+				//
+				String thuyet_minh = Utils.toHTML(rs.getString("thuyet_minh"));
+				String trang_thai = Utils.toHTML(rs.getString("trang_thai"));
+				if (trang_thai.equals("3") )
+				{
+					trang_thai = "3-Da xu ly";
+				}					
+				String ngay_tat_toan = Utils.toHTML(rs.getString("ngay_tat_toan"));
+				String id_dulieu = Utils.toHTML(rs.getString("id_dulieu"));
+				String duyet_bc = Utils.toHTML(rs.getString("duyet_bc"));
+				String user_nhap = Utils.toHTML(rs.getString("user_nhap"));
+				String user_duyet = Utils.toHTML(rs.getString("user_duyet"));
+				
+					
+				sb.append("<row><cell>");	
+				sb.append(TRBR);
+				sb.append("</cell><cell>");
+				sb.append(phong_ban);
+				sb.append("</cell><cell>");
+				sb.append(ngay_bao_cao);
+				sb.append("</cell><cell>");		
+				sb.append(TRUSRN);
+				sb.append("</cell><cell>");
+				sb.append(DATADATE7);
+				sb.append("</cell><cell>");
+				sb.append(TRSEQ);
+				sb.append("</cell><cell>");
+				sb.append(GTACCT);
+				sb.append("</cell><cell>");
+				sb.append(TRCTYP);
+				sb.append("</cell><cell>");
+				sb.append(TRDORC);
+				sb.append("</cell><cell>");
+				sb.append(TRAMT);
+				sb.append("</cell><cell>");
+				sb.append(TREFTH);
+				sb.append("</cell><cell>");
+				sb.append(thuyet_minh);
+				sb.append("</cell><cell>");
+				sb.append(trang_thai);
+				sb.append("</cell><cell>");
+				sb.append(ngay_tat_toan);
+				sb.append("</cell><cell>");
+				sb.append(id_dulieu);
+				sb.append("</cell><cell>");
+				sb.append(duyet_bc);
+				sb.append("</cell><cell>");
+				sb.append(user_nhap);
+				sb.append("</cell><cell>");
+				sb.append(user_duyet);
+				sb.append("</cell><cell>");
+				
+			}			
+			return "<rows><page>"+getDTO.getPage()+"</page><total>"+String.valueOf(iTotalPage)+"</total><records>"+String.valueOf(count)+"</records>"+sb.toString()+"</rows>";			
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Chuyen doi trang thai:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}		
+	}
+		
+	public String edit_nhieu_banghi(String id_dulieu, String so_tien, String thuyet_minh, 
+									String UserName, String UserBranch, String ipAddress)
+	{
+		//String id = id_dulieu;	
+		//id = id.substring(1);
+		try 
+		{				
+					String sql = 
+						"update qltktg_glstrn" 
+					    +" SET "
+                        + "TRAMT = " + so_tien
+                        + ", THUYET_MINH = '" + thuyet_minh + "'" 
+                        + ", TRANG_THAI = 1" 
+                        + ", NGAY_TAT_TOAN = null "
+                        + " WHERE ID_DULIEU IN (" + id_dulieu + ")";
+                      
+						int res;
+						res = DB.jdbcTemplate.update(sql);		
+										
+						sql = sql.replace("'", "''");																		
+						LogsImpl.WriteLogs_QLTKTG(UserName, ipAddress, UserBranch, "5", sql);
+						
+						return "Success";							
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Chuyen doi trang thai - Sua du lieu:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+		
+		
+		
+	}
+	
+	public String stripNonValidXMLCharacters(String in) {
+        StringBuffer out = new StringBuffer(); // Used to hold the output.
+        char current; // Used to reference the current character.
+
+        if (in == null || ("".equals(in))) return ""; // vacancy test.
+        for (int i = 0; i < in.length(); i++) {
+            current = in.charAt(i); // NOTE: No IndexOutOfBoundsException caught here; it should not happen.
+            if ((current == 0x9) ||
+                (current == 0xA) ||
+                (current == 0xD) ||
+                ((current >= 0x20) && (current <= 0xD7FF)) ||
+                ((current >= 0xE000) && (current <= 0xFFFD)) ||
+                ((current >= 0x10000) && (current <= 0x10FFFF)))
+                out.append(current);
+        }
+        return out.toString();
+    }
+	
+}
+;
+package com.bidv.ftp.jdbc;
+
+import java.net.InetAddress;
+import java.sql.CallableStatement;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Random;
+
+import oracle.jdbc.driver.OracleTypes;
+
+
+import java.util.Map;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.rowset.SqlRowSet;
+//
+
+import java.io.*;
+import java.util.Date;
+import java.text.*;
+import java.util.Calendar;
+
+import java.text.DateFormat;
+import java.text.SimpleDateFormat; 
+import java.text.DecimalFormat;
+
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Types;
+ 
+import com.bidv.ftp.resource.DB;
+import com.bidv.ftp.util.Constants;
+import com.bidv.ftp.util.Utils;
+
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.SqlOutParameter;
+import org.springframework.jdbc.core.SqlParameter;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.sql.DataSource;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import org.springframework.jdbc.object.StoredProcedure;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+
+import com.bidv.ftp.dao.NhapThuyetMinhDAO;
+import com.bidv.ftp.dto.NhapThuyetMinhDTO;
+import com.bidv.ftp.dto.GetDTO;
+
+
+public class NhapThuyetMinhImpl implements NhapThuyetMinhDAO
+{	
+	public String TimKiem(GetDTO getDTO, String WhereConditon)
+	{
+		try
+		{
+			String ngay_giao_dich = Utils.getTag(WhereConditon,"<DATE>","</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereConditon,"<CHINHANH>","</CHINHANH>");		
+			String user_param = Utils.getTag(WhereConditon,"<USER>","</USER>");
+			String user_lienquan_param = Utils.getTag(WhereConditon,"<USER_LIENQUAN>","</USER_LIENQUAN>");
+			String so_chung_tu_param = Utils.getTag(WhereConditon,"<SOCHUNGTU>","</SOCHUNGTU>");
+			String tai_khoan_param = Utils.getTag(WhereConditon,"<TAIKHOAN>","</TAIKHOAN>");
+			String ma_tien_te_param = Utils.getTag(WhereConditon,"<MATIENTE>","</MATIENTE>");
+			String phong_ban_param = Utils.getTag(WhereConditon,"<PHONGBAN>","</PHONGBAN>");
+			String so_tien_param = Utils.getTag(WhereConditon,"<SOTIEN>","</SOTIEN>");
+			String so_tien_min_param = Utils.getTag(WhereConditon,"<SOTIEN_MIN>","</SOTIEN_MIN>");
+			String so_tien_max_param = Utils.getTag(WhereConditon,"<SOTIEN_MAX>","</SOTIEN_MAX>");
+			
+			
+			//04-2018
+			String loc_gd = Utils.getTag(WhereConditon,"<LOCGD>","</LOCGD>");
+			String trangthai = Utils.getTag(WhereConditon,"<TRANGTHAI>","</TRANGTHAI>");
+			
+			// Check null o JSP			
+			String where_sql = "";
+			where_sql = "where ngay_bao_cao = to_date(" +"'" + ngay_giao_dich + "','dd/mm/yyyy')" ;			
+			where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+			
+			if (user_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trusrn) = " + "'" + user_param + "'"; 
+			}	
+			if (user_lienquan_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and (trim(TRUSRN) in (select trim(ma_user) from qludtt_usm_ds_user where ma_cb ='" + user_lienquan_param + "')"; 
+				where_sql = where_sql + " or trim(TRUSRN) = '" + user_lienquan_param + "') ";
+				//and (trim(TRUSRN) in (select trim(ma_user) from qludtt_usm_ds_user where ma_cb ='29301') or trim(TRUSRN) = '29301')
+			}
+			//
+			if (so_chung_tu_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trseq) = " + "'" + so_chung_tu_param + "'" ; 
+			}			
+			if (tai_khoan_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and GTACCT = " + "'" + tai_khoan_param + "'" ; 
+			}
+			if (ma_tien_te_param.equals("-1")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(TRCTYP) = " + "'" + ma_tien_te_param + "'" ; 
+			}
+			
+			// phong ban
+						if (phong_ban_param.equals("-1")) {
+						} else {
+							where_sql = where_sql + " and SEGMENT2 = '" + phong_ban_param
+									+ "'"; // phong_ban
+						}
+			
+			if (so_tien_param.equals("")) {}
+			else
+			{	
+				    where_sql = where_sql + " and TRAMT = " + so_tien_param ;
+			}
+			if (so_tien_min_param.equals("")) {}
+			else
+			{	
+				    where_sql = where_sql + " and TRAMT >= " + so_tien_min_param ;
+			}
+			if (so_tien_max_param.equals("")) {}
+			else
+			{	
+				    where_sql = where_sql + " and TRAMT <= " + so_tien_max_param ;
+			}
+								
+			// Man hinh NHAP MOI THUYET MINH chi hien thi trang thai = null hoac 1-Cho duyet
+			//where_sql = where_sql + " and (trang_thai = '1' or  nvl(trang_thai,'999') = 999 ) " ;		
+			//04-2018 	
+			if (trangthai.equals("1")) 
+			{
+				where_sql = where_sql + " and (trang_thai = '3' or  nvl(trang_thai,'999') = 999 ) " ;
+			}
+			if (trangthai.equals("2")) {
+				where_sql = where_sql + " and  nvl(trang_thai,'999') = 999  " ;
+			} 
+			if (trangthai.equals("3")) 
+			{
+				where_sql = where_sql + " and trang_thai = '1'  " ;
+			}
+			if (trangthai.equals("4")) 
+			{
+				where_sql = where_sql + " and trang_thai = '3'  " ;
+			}
+															
+			// Khong hien thi GD da duoc danh dau Doi chieu
+			where_sql = where_sql + " and TRTRTE = 0  " ;
+			
+			/*<option value="1">-1-ALL</option>
+			<option value="2">-2-Bỏ GD có Nợ = Có</option>*/
+			DateFormat dateFormat = new SimpleDateFormat("yyyyMMddHHmmss");
+		    Date date = new Date();		    
+		    Random rn = new Random();
+	        int range = 1000;
+	        int randomNum = 1 + rn.nextInt(range);
+	       		        
+		    String key = String.valueOf(dateFormat.format(date)) + String.valueOf(randomNum);
+		    loc_gd = "1";
+		    if (loc_gd.equals("1")) {}
+			if (loc_gd.equals("2")) 
+			{
+				String count_sql = "select count(*) from TEMP_BC_BM06 where trbr = '" + chi_nhanh_param + 
+						           "' and ngay_bao_cao = to_date(" +"'" + ngay_giao_dich + "','dd/mm/yyyy')"  ;	
+				int count = 0;
+				count = DB.jdbcTemplate.queryForInt(count_sql);
+				
+				// Neu chua call store BC_BM06_NHAP_GD lan nao
+				if (count == 0)
+				{
+				// Call Store
+				Connection conn = null;
+				//CallableStatement st = null;			
+				conn = DB.getConnection().getDataSource().getConnection();
+				try (CallableStatement st = conn.prepareCall("{call BC_BM06_NHAP_GD(?,?,?)}")) {
+					st.setString(1, ngay_giao_dich);
+				    st.setString(2, chi_nhanh_param);		     
+				    st.setString(3, key);
+				    st.execute();
+				}
+				};
+				
+			    //where_sql = where_sql + " and Id_Dulieu not in (select Id_Dulieu from TEMP_BC_BM06 where time_key = '" + key + "') " ;
+				where_sql = where_sql 
+						    + " and Id_Dulieu not in (select distinct Id_Dulieu from TEMP_BC_BM06 where trbr = '" 
+						    + chi_nhanh_param 
+						    + "' and ngay_bao_cao = to_date(" +"'" + ngay_giao_dich + "','dd/mm/yyyy'))" ;
+			}			
+			
+
+			
+			int ipage = Integer.parseInt(getDTO.getPage());
+			int ilimit = Integer.parseInt(getDTO.getLimit());
+			String Start =  String.valueOf((ipage-1)*ilimit + 1);
+			String End = String.valueOf(ipage*ilimit);		
+			int count = 0;
+			SqlRowSet rs ;		
+			int iTotalPage;			
+			if (getDTO.getSidx().equals("STT"))	getDTO.setSidx("STT");
+			String count_sql = "select count(*) from qltktg_glstrn " + where_sql;	
+			count = DB.jdbcTemplate.queryForInt(count_sql);
+			iTotalPage = count/ilimit;
+			int acCount = iTotalPage * ilimit;
+			if (acCount<count) iTotalPage++ ;
+			
+			String where = " where STT between " + Start + " and " + End;	
+			
+			String sql = 
+				"select * from" 					   
+				+" (select rownum as STT," 
+				+ "TRBR, phong_ban, to_char(ngay_bao_cao, 'dd/mm/yyyy') ngay_bao_cao, "
+				+ "TRUSRN, to_char(DATADATE7, 'dd/mm/yyyy') DATADATE7,TRSEQ,GTACCT,SEGMENT2, SEGMENT5 ,SEGMENT4,SEGMENT6,TRCTYP,TRDORC,TRAMT," +
+				" replace(replace( replace(TREFTH, CHR(10), ''), CHR(13), ''), CHR(09), '') TREFTH,ZCHANREFNO,TRREFN," +
+				" thuyet_minh,trang_thai," +
+				"to_char(ngay_tat_toan, 'dd/mm/yyyy') ngay_tat_toan,id_dulieu, duyet_bc, user_nhap, user_duyet " 
+				+" from qltktg_glstrn " 
+			    + where_sql + 
+			    " Order by trang_thai, phong_ban, TRUSRN  )"  
+			    + where + " Order by STT";			
+			
+			rs = DB.jdbcTemplate.queryForRowSet(sql);
+					
+			StringBuilder sb = new StringBuilder();
+			while (rs.next()) 
+			{
+         		String TRBR = Utils.toHTML(Utils.checkNull(rs.getString("TRBR") ));
+				String phong_ban = Utils.toHTML(rs.getString("phong_ban"));
+				String ngay_bao_cao = Utils.toHTML(rs.getString("ngay_bao_cao"));
+				String TRUSRN = Utils.toHTML(rs.getString("TRUSRN"));	
+				String DATADATE7 = Utils.toHTML(rs.getString("DATADATE7"));								
+				String TRSEQ = Utils.toHTML(rs.getString("TRSEQ"));	
+				String GTACCT = Utils.toHTML(rs.getString("GTACCT"));
+				String SEGMENT2 = Utils.toHTML(rs.getString("SEGMENT2"));
+				String SEGMENT5 = Utils.toHTML(rs.getString("SEGMENT5"));
+				String SEGMENT4 = Utils.toHTML(rs.getString("SEGMENT4"));
+				
+				String SEGMENT6 = Utils.toHTML(rs.getString("SEGMENT6"));
+				String TRCTYP = Utils.toHTML(rs.getString("TRCTYP"));
+				String TRDORC = Utils.toHTML(rs.getString("TRDORC"));
+				String TRAMT = Utils.toHTML(rs.getString("TRAMT"));
+				//
+				String TREFTH = Utils.toHTML( Utils.checkNull(rs.getString("TREFTH")) );	
+				TREFTH = stripNonValidXMLCharacters(TREFTH);
+				//
+				String ZCHANREFNO = Utils.toHTML(rs.getString("ZCHANREFNO"));
+				String TRREFN = Utils.toHTML(rs.getString("TRREFN"));
+				String thuyet_minh = Utils.toHTML(rs.getString("thuyet_minh"));
+				String trang_thai = Utils.toHTML(rs.getString("trang_thai"));
+				if (trang_thai.equals("1") ){
+					trang_thai = "1-Cho duyet";
+				}
+				if (trang_thai.equals("2") ){
+					trang_thai = "2-Da duyet";
+				}
+				if (trang_thai.equals("3") ){
+					trang_thai = "3-Da xu ly";
+				}			
+				String ngay_tat_toan = Utils.toHTML(rs.getString("ngay_tat_toan"));			
+				String id_dulieu = Utils.toHTML(rs.getString("id_dulieu"));
+				String duyet_bc = Utils.toHTML(rs.getString("duyet_bc"));
+				String user_nhap = Utils.toHTML(rs.getString("user_nhap"));
+				String user_duyet = Utils.toHTML(rs.getString("user_duyet"));
+				
+				
+				sb.append("<row><cell>");	
+				sb.append(TRBR);
+				sb.append("</cell><cell>");
+				sb.append(phong_ban);
+				sb.append("</cell><cell>");
+				sb.append(ngay_bao_cao);
+				sb.append("</cell><cell>");		
+				sb.append(TRUSRN);
+				sb.append("</cell><cell>");
+				sb.append(DATADATE7);
+				sb.append("</cell><cell>");
+				sb.append(TRSEQ);
+				sb.append("</cell><cell>");
+				sb.append(GTACCT);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT2);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT5);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT4);
+				sb.append("</cell><cell>");
+				
+				sb.append(SEGMENT6);
+				sb.append("</cell><cell>");
+				sb.append(TRCTYP);
+				sb.append("</cell><cell>");
+				sb.append(TRDORC);
+				sb.append("</cell><cell>");
+				sb.append(TRAMT);
+				sb.append("</cell><cell>");
+				sb.append(Utils.toHTML(Utils.checkNull(TREFTH.trim().replaceAll("[-+.^:,]",""))));
+				sb.append("</cell><cell>");
+				sb.append(ZCHANREFNO);
+				sb.append("</cell><cell>");
+				sb.append(TRREFN);
+				sb.append("</cell><cell>");
+				sb.append(thuyet_minh);
+				sb.append("</cell><cell>");
+				sb.append(trang_thai);
+				sb.append("</cell><cell>");
+				sb.append(ngay_tat_toan);
+				sb.append("</cell><cell>");
+				sb.append(id_dulieu);
+				sb.append("</cell><cell>");
+				sb.append(duyet_bc);
+				sb.append("</cell><cell>");
+				sb.append(user_nhap);
+				sb.append("</cell><cell>");
+				sb.append(user_duyet);
+				sb.append("</cell></row>");
+				
+			}
+			String a = "<rows><page>"+getDTO.getPage()+"</page><total>"+String.valueOf(iTotalPage)+"</total><records>"+String.valueOf(count)+"</records>"+sb.toString()+"</rows>";
+			String xmlString = "<?xml version=\"1.0\" encoding=\"utf-8\"?>"+a;  
+
+			DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();  
+			//DocumentBuilder builder;  
+			try  
+			{       
+				// Disable external entity resolution
+		    	factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+		    	factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+		    	factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+		    	factory.setFeature("http://javax.xml.XMLConstants/feature/secure-processing", true);
+		    	
+				    DocumentBuilder builder = factory.newDocumentBuilder();  
+			        Document document = builder.parse( new InputSource( new StringReader(xmlString ) ) );  
+			} 
+			catch (Exception e) 
+			{  
+			        //e.printStackTrace();  
+			} 
+			return "<rows><page>"+getDTO.getPage()+"</page><total>"+String.valueOf(iTotalPage)+"</total><records>"+String.valueOf(count)+"</records>"+sb.toString()+"</rows>";			
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Nhap Thuyet Minh:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}		
+	}
+	
+	public String TimKiem_day_duyet(GetDTO getDTO, String WhereConditon)
+	{
+		try
+		{
+			String ngay_giao_dich = Utils.getTag(WhereConditon,"<DATE>","</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereConditon,"<CHINHANH>","</CHINHANH>");			
+			String user_param = Utils.getTag(WhereConditon,"<USER>","</USER>");
+			String so_chung_tu_param = Utils.getTag(WhereConditon,"<SOCHUNGTU>","</SOCHUNGTU>");			
+			String tai_khoan_param = Utils.getTag(WhereConditon,"<TAIKHOAN>","</TAIKHOAN>");
+			String ma_tien_te_param = Utils.getTag(WhereConditon,"<MATIENTE>","</MATIENTE>");			
+			String phong_ban_param = Utils.getTag(WhereConditon,"<PHONGBAN>","</PHONGBAN>");
+			
+			// Check null o JSP			
+			String where_sql = "";
+			where_sql = "where ngay_bao_cao = to_date(" +"'" + ngay_giao_dich + "','dd/mm/yyyy')" ;			
+			where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+			
+			if (user_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trusrn) = " + "'" + user_param + "'"; 
+			}	
+			if (so_chung_tu_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trseq) = " + "'" + so_chung_tu_param + "'" ; 
+			}			
+			if (tai_khoan_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and GTACCT = " + "'" + tai_khoan_param + "'" ; 
+			}
+			if (ma_tien_te_param.equals("-1")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(TRCTYP) = " + "'" + ma_tien_te_param + "'" ; 
+			}
+			if (phong_ban_param.equals("-1")) {}
+			else
+			{	
+				    where_sql = where_sql + " and SEGMENT2 = '" + phong_ban_param + "'"; //phong_ban
+			}	
+			
+			// Man hinh NHAP MOI THUYET MINH chi hien thi trang thai = null hoac 1-Cho duyet
+			//where_sql = where_sql + " and  nvl(trang_thai,'999') = 999 and phong_ban IS NOT NULL " ;
+ 			//04/2018
+			where_sql = where_sql + " and ( (nvl(trang_thai,'999') = 999 and phong_ban IS NOT NULL) or (trang_thai = '3' and duyet_bc = 'N') ) ";
+			where_sql = where_sql + " and TRTRTE = 0 and thuyet_minh is not null";
+			
+			
+			int ipage = Integer.parseInt(getDTO.getPage());
+			int ilimit = Integer.parseInt(getDTO.getLimit());
+			String Start =  String.valueOf((ipage-1)*ilimit + 1);
+			String End = String.valueOf(ipage*ilimit);		
+			int count = 0;
+			SqlRowSet rs ;
+			int iTotalPage;			
+			if (getDTO.getSidx().equals("STT"))	getDTO.setSidx("STT");
+			String count_sql = "select count(*) from qltktg_glstrn " + where_sql;	
+			count = DB.jdbcTemplate.queryForInt(count_sql);
+			iTotalPage = count/ilimit;
+			int acCount = iTotalPage * ilimit;
+			if (acCount<count) iTotalPage++ ;
+			
+			String where = " where STT between " + Start + " and " + End;	
+			
+			String sql = 
+				"select * from" 				   
+				+" (select rownum as STT," 
+				+ "TRBR, phong_ban, to_char(ngay_bao_cao, 'dd/mm/yyyy') ngay_bao_cao, "	
+				+ "TRUSRN, to_char(DATADATE7, 'dd/mm/yyyy') DATADATE7,TRSEQ,GTACCT,SEGMENT2, SEGMENT5,SEGMENT4,SEGMENT6,TRCTYP,TRDORC,TRAMT," +
+				" replace(replace( replace(TREFTH, CHR(10), ''), CHR(13), ''), CHR(09), '') TREFTH," +
+				" ZCHANREFNO,TRREFN,thuyet_minh,trang_thai,to_char(ngay_tat_toan, 'dd/mm/yyyy') ngay_tat_toan," +
+				"id_dulieu, duyet_bc, user_nhap, user_duyet " 
+				+" from qltktg_glstrn " 
+			    + where_sql + 
+			    " Order by phong_ban, TRUSRN, trang_thai )" 
+			    + where + " Order by STT";			
+			
+			rs = DB.jdbcTemplate.queryForRowSet(sql);
+					
+			StringBuilder sb = new StringBuilder();
+			while (rs.next()) 
+			{
+         		String TRBR = Utils.toHTML(Utils.checkNull(rs.getString("TRBR") ));
+				String phong_ban = Utils.toHTML(rs.getString("phong_ban"));
+				String ngay_bao_cao = Utils.toHTML(rs.getString("ngay_bao_cao"));				
+				String TRUSRN = Utils.toHTML(rs.getString("TRUSRN"));				
+				String DATADATE7 = Utils.toHTML(rs.getString("DATADATE7"));						
+				String TRSEQ = Utils.toHTML(rs.getString("TRSEQ"));	
+				String GTACCT = Utils.toHTML(rs.getString("GTACCT"));
+				String SEGMENT2 = Utils.toHTML(rs.getString("SEGMENT2"));
+				String SEGMENT5 = Utils.toHTML(rs.getString("SEGMENT5"));
+				String SEGMENT4 = Utils.toHTML(rs.getString("SEGMENT4"));
+				
+				String SEGMENT6 = Utils.toHTML(rs.getString("SEGMENT6"));
+				String TRCTYP = Utils.toHTML(rs.getString("TRCTYP"));
+				String TRDORC = Utils.toHTML(rs.getString("TRDORC"));
+				String TRAMT = Utils.toHTML(rs.getString("TRAMT"));
+				//
+				String TREFTH = Utils.toHTML( Utils.checkNull(rs.getString("TREFTH")) );	
+				TREFTH = stripNonValidXMLCharacters(TREFTH);
+				//
+				String ZCHANREFNO = Utils.toHTML(rs.getString("ZCHANREFNO"));
+				String TRREFN = Utils.toHTML(rs.getString("TRREFN"));
+				String thuyet_minh = Utils.toHTML(rs.getString("thuyet_minh"));
+				String trang_thai = Utils.toHTML(rs.getString("trang_thai"));
+				if (trang_thai.equals("1") )
+				{
+					trang_thai = "1-Cho duyet";
+				}	
+				String ngay_tat_toan = Utils.toHTML(rs.getString("ngay_tat_toan"));								
+				String id_dulieu = Utils.toHTML(rs.getString("id_dulieu"));
+				String duyet_bc = Utils.toHTML(rs.getString("duyet_bc"));
+				String user_nhap = Utils.toHTML(rs.getString("user_nhap"));
+				String user_duyet = Utils.toHTML(rs.getString("user_duyet"));
+			
+								
+				sb.append("<row><cell>");	
+				sb.append(TRBR);
+				sb.append("</cell><cell>");
+				sb.append(phong_ban);
+				sb.append("</cell><cell>");
+				sb.append(ngay_bao_cao);
+				sb.append("</cell><cell>");		
+				sb.append(TRUSRN);
+				sb.append("</cell><cell>");
+				sb.append(DATADATE7);
+				sb.append("</cell><cell>");
+				sb.append(TRSEQ);
+				sb.append("</cell><cell>");
+				sb.append(GTACCT);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT2);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT5);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT4);
+				sb.append("</cell><cell>");
+				
+				sb.append(SEGMENT6);
+				sb.append("</cell><cell>");
+				sb.append(TRCTYP);
+				sb.append("</cell><cell>");
+				sb.append(TRDORC);
+				sb.append("</cell><cell>");
+				sb.append(TRAMT);
+				sb.append("</cell><cell>");
+				sb.append(Utils.toHTML(Utils.checkNull(TREFTH.trim().replaceAll("[-+.^:,]",""))));
+				sb.append("</cell><cell>");
+				sb.append(ZCHANREFNO);
+				sb.append("</cell><cell>");
+				sb.append(TRREFN);
+				sb.append("</cell><cell>");
+				sb.append(thuyet_minh);
+				sb.append("</cell><cell>");
+				sb.append(trang_thai);
+				sb.append("</cell><cell>");
+				sb.append(ngay_tat_toan);
+				sb.append("</cell><cell>");
+				sb.append(id_dulieu);
+				sb.append("</cell><cell>");
+				sb.append(duyet_bc);
+				sb.append("</cell><cell>");
+				sb.append(user_nhap);
+				sb.append("</cell><cell>");
+				sb.append(user_duyet);
+				sb.append("</cell></row>");
+				
+				
+			}
+			String a = "<rows><page>"+getDTO.getPage()+"</page><total>"+String.valueOf(iTotalPage)+"</total><records>"+String.valueOf(count)+"</records>"+sb.toString()+"</rows>";
+			String xmlString = "<?xml version=\"1.0\" encoding=\"utf-8\"?>"+a;  
+
+		    DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();    
+		    try  
+			{  
+		    	// Disable external entity resolution
+		    	factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+		    	factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+		    	factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+		    	factory.setFeature("http://javax.xml.XMLConstants/feature/secure-processing", true);
+		    	
+		    	DocumentBuilder builder = factory.newDocumentBuilder();  
+			    Document document = builder.parse( new InputSource( new StringReader(xmlString ) ) );  
+			} 
+		    catch (Exception e) 
+		    {  
+			        //e.printStackTrace();  
+			} 
+			return "<rows><page>"+getDTO.getPage()+"</page><total>"+String.valueOf(iTotalPage)+"</total><records>"+String.valueOf(count)+"</records>"+sb.toString()+"</rows>";			
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Day duyet:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}		
+	}
+		
+	public String edit_nhieu_banghi(String id_dulieu, String so_tien, String thuyet_minh, String ma_phong_ban, String UserName, String UserBranch,String ipAddress)
+	{
+		//String id = id_dulieu;	
+		//id = id.substring(1);
+		
+		String sql_update = "";	
+		// So tien khac NULL - check tren JSP
+		sql_update = sql_update + " SET TRAMT = " + so_tien ;	
+		// thuyet minh
+		// truong hop user xoa thuyet minh thi thuyet minh = ""
+		sql_update = sql_update + " ,THUYET_MINH = " + "'" + thuyet_minh + "'";	
+		// Ma phong ban khac NULL - check tren JSP
+		sql_update = sql_update + " ,PHONG_BAN = " + "'" + ma_phong_ban + "'";	
+		// user nhap
+		sql_update = sql_update + " ,user_nhap = " + "'" + UserName + "'";
+		
+		try 
+		{
+					String sql = 
+						"update qltktg_glstrn" 
+					    + sql_update
+                        + " WHERE ID_DULIEU IN (" + id_dulieu + ")";
+                       
+						int res;
+						res = DB.jdbcTemplate.update(sql);		
+											
+						sql = sql.replace("'", "''");												
+						LogsImpl.WriteLogs_QLTKTG(UserName, ipAddress, UserBranch, "3", sql);		    
+						
+					return "success";										
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Nhap thuyet minh - Sua thuyet minh:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+		
+		
+	}
+		
+	public String day_duyet(String id_dulieu)
+	{
+		//String id = id_dulieu;	
+		//id = id.substring(1);
+		try 
+		{		
+					String sql = 
+						"update qltktg_glstrn" 
+					    +" SET TRANG_THAI=1"                        
+                        + " WHERE ID_DULIEU IN (" + id_dulieu + ")";
+					
+					int res;
+					res = DB.jdbcTemplate.update(sql);		
+						
+					//LogsImpl.WriteLogs(UserName, ipaddress, "INSERT_THAMSO_BDS", "INSERT_THAMSO_BDS", sql);	           
+					return "success";	
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Nhap thuyet minh - Day duyet:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+				
+		
+	}
+		
+	public String day_duyet_nhieu_gd(String id_dulieu, String UserName, String UserBranch, String ipAddress)
+	{
+		String id = id_dulieu;	
+		id = id.substring(1);
+		try 
+		{		
+					String sql = 
+						"update qltktg_glstrn" 
+					    +" SET TRANG_THAI=1,NGAY_TAT_TOAN = null"                        
+                        + " WHERE ID_DULIEU IN (" + id + ")"
+                        + "and ( (phong_ban IS NOT NULL   and nvl(trang_thai,'999') = 999) or trang_thai = '3') and duyet_bc = 'N'  "
+                        ;
+					int res;
+					res = DB.jdbcTemplate.update(sql);		
+						
+					sql = sql.replace("'", "''");												
+					LogsImpl.WriteLogs_QLTKTG(UserName, ipAddress, UserBranch, "4", sql);	           				
+					return "success";	
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Nhap thuyet minh - Day duyet:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+				
+		
+	}
+		
+	public String XuatExcel(GetDTO getDTO, String WhereConditon)
+	{
+		try
+		{
+			String ngay_giao_dich = Utils.getTag(WhereConditon,"<DATE>","</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereConditon,"<CHINHANH>","</CHINHANH>");			
+			String user_param = Utils.getTag(WhereConditon,"<USER>","</USER>");
+			String user_lienquan_param = Utils.getTag(WhereConditon,"<USER_LIENQUAN>","</USER_LIENQUAN>");
+			String so_chung_tu_param = Utils.getTag(WhereConditon,"<SOCHUNGTU>","</SOCHUNGTU>");			
+			String tai_khoan_param = Utils.getTag(WhereConditon,"<TAIKHOAN>","</TAIKHOAN>");
+			String ma_tien_te_param = Utils.getTag(WhereConditon,"<MATIENTE>","</MATIENTE>");			
+			String phong_ban_param = Utils.getTag(WhereConditon,"<PHONGBAN>","</PHONGBAN>");
+			String so_tien_param = Utils.getTag(WhereConditon,"<SOTIEN>","</SOTIEN>");
+			String so_tien_min_param = Utils.getTag(WhereConditon,"<SOTIEN_MIN>","</SOTIEN_MIN>");
+			String so_tien_max_param = Utils.getTag(WhereConditon,"<SOTIEN_MAX>","</SOTIEN_MAX>");
+			
+			//04-2018
+			String loc_gd = Utils.getTag(WhereConditon,"<LOCGD>","</LOCGD>");
+			String trangthai = Utils.getTag(WhereConditon,"<TRANGTHAI>","</TRANGTHAI>");
+			
+			// Check null o JSP			
+			String where_sql = "";
+			where_sql = "where ngay_bao_cao = to_date(" +"'" + ngay_giao_dich + "','dd/mm/yyyy')" ;			
+			where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";			
+
+			if (user_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trusrn) = " + "'" + user_param + "'"; 
+			}
+			if (user_lienquan_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and (trim(TRUSRN) in (select trim(ma_user) from qludtt_usm_ds_user where ma_cb ='" + user_lienquan_param + "')"; 
+				where_sql = where_sql + " or trim(TRUSRN) = '" + user_lienquan_param + "') ";
+				//and (trim(TRUSRN) in (select trim(ma_user) from qludtt_usm_ds_user where ma_cb ='29301') or trim(TRUSRN) = '29301')
+			}
+			//
+			if (so_chung_tu_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trseq) = " + "'" + so_chung_tu_param + "'" ; 
+			}
+			if (tai_khoan_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(GTACCT) = " + "'" + tai_khoan_param + "'" ; 
+			}
+			if (ma_tien_te_param.equals("-1")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(TRCTYP) = " + "'" + ma_tien_te_param + "'" ; 
+			}
+			if (phong_ban_param.equals("-1")) {}
+			else
+			{	
+				    where_sql = where_sql + " and SEGMENT2 = '" + phong_ban_param + "'";
+			}	
+			if (so_tien_param.equals("")) {}
+			else
+			{	
+				    where_sql = where_sql + " and TRAMT = " + so_tien_param ;
+			}
+			if (so_tien_min_param.equals("")) {}
+			else
+			{	
+				    where_sql = where_sql + " and TRAMT >= " + so_tien_min_param ;
+			}
+			if (so_tien_max_param.equals("")) {}
+			else
+			{	
+				    where_sql = where_sql + " and TRAMT <= " + so_tien_max_param ;
+			}
+			
+			
+			//04-2018 
+			if (trangthai.equals("1")) 
+			{
+				where_sql = where_sql + " and (trang_thai = '3' or  nvl(trang_thai,'999') = 999 ) " ;
+			}
+			if (trangthai.equals("2")) {
+				where_sql = where_sql + " and  nvl(trang_thai,'999') = 999  " ;
+			} 
+			if (trangthai.equals("3")) 
+			{
+				where_sql = where_sql + " and trang_thai = '1'  " ;
+			}
+			if (trangthai.equals("4")) 
+			{
+				where_sql = where_sql + " and trang_thai = '2'  " ;
+			}
+			if (trangthai.equals("5")) 
+			{
+				
+			}										
+			
+			/*<option value="1">-1-ALL</option>
+			<option value="2">-2-Bỏ GD có Nợ = Có</option>*/
+			DateFormat dateFormat = new SimpleDateFormat("yyyyMMddHHmmss");
+		    Date date = new Date();		    
+		    Random rn = new Random();
+	        int range = 1000;
+	        int randomNum = 1 + rn.nextInt(range);
+	       	    
+		    String key = String.valueOf(dateFormat.format(date)) + String.valueOf(randomNum);
+			if (loc_gd.equals("1")) {}
+			if (loc_gd.equals("2")) 
+			{
+				// Call Store
+				Connection conn = null;
+				//CallableStatement st = null;			
+				//conn = DB.getConnection();
+				conn = DB.getConnection().getDataSource().getConnection();
+				try(CallableStatement st = conn.prepareCall("{call BC_BM06_NHAP_GD(?,?,?)}")){
+					st.setString(1, ngay_giao_dich);
+				    st.setString(2, chi_nhanh_param);		     
+				    st.setString(3, key);
+				    st.execute();
+				}
+
+			    where_sql = where_sql + " and Id_Dulieu not in (select Id_Dulieu from TEMP_BC_BM06 where time_key = '" + key + "') " ;
+			}
+				
+			//04-2018
+			
+			// Man hinh NHAP MOI THUYET MINH chi hien thi trang thai = null hoac 1-Cho duyet
+			//where_sql = where_sql + " and (trang_thai = '1' or trang_thai is null) " ;	
+
+			String sql = 
+				"Select " 
+			    + "TRBR as CHINHANH, " +
+			    "phong_ban as PHONGBAN, " +
+			    " ngay_bao_cao, "
+			    + "trusrn as USER_HACHTOAN, " +
+			    "trunc(DATADATE7) as NGAYGD, " +
+			    "TRSEQ as SO_CHUNG_TU , " +
+			    "GTACCT as SO_TAI_KHOAN, " +
+			    //"SEGMENT2 , SEGMENT5 ,SEGMENT4 ,SEGMENT6"+
+			    "SEGMENT2 as MaPhongban, SEGMENT5 as MaSanpham,SEGMENT4 as MaDVLQ,SEGMENT6 as MaKH," +
+			    " TRCTYP as MA_TIEN_TE, " +
+			    "TRDORC as NO_CO, " +
+			    "TRAMT as SO_TIEN, " +
+			    "TREFTH as NOI_DUNG," 
+				+ "THUYET_MINH, " +
+				"trang_thai, " +
+				"trunc(ngay_tat_toan) NGAY_TAT_TOAN " 
+				+ " ,duyet_BC, user_nhap, user_duyet, ID_DULIEU AUTO_ID "
+				+" from qltktg_glstrn " 
+			    + where_sql +     
+			    " Order by TRBR, phong_ban, DATADATE7,trusrn, GTACCT, TRCTYP" ;
+			   
+			return sql;
+							
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Xuat Excel - Nhap Thuyet Minh:" + ex.getMessage());
+			return "";
+		}		
+	}
+
+	public String XuatExcel_DayDuyet(GetDTO getDTO, String WhereConditon)
+	{
+		try
+		{
+			String ngay_giao_dich = Utils.getTag(WhereConditon,"<DATE>","</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereConditon,"<CHINHANH>","</CHINHANH>");			
+			String user_param = Utils.getTag(WhereConditon,"<USER>","</USER>");
+			String so_chung_tu_param = Utils.getTag(WhereConditon,"<SOCHUNGTU>","</SOCHUNGTU>");			
+			String tai_khoan_param = Utils.getTag(WhereConditon,"<TAIKHOAN>","</TAIKHOAN>");
+			String ma_tien_te_param = Utils.getTag(WhereConditon,"<MATIENTE>","</MATIENTE>");			
+			String phong_ban_param = Utils.getTag(WhereConditon,"<PHONGBAN>","</PHONGBAN>");
+			
+			// Check null o JSP			
+			String where_sql = "";
+			where_sql = "where ngay_bao_cao = to_date(" +"'" + ngay_giao_dich + "','dd/mm/yyyy')" ;			
+			where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+			
+			if (user_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trusrn) = " + "'" + user_param + "'"; 
+			}	
+			if (so_chung_tu_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trseq) = " + "'" + so_chung_tu_param + "'" ; 
+			}			
+			if (tai_khoan_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and GTACCT = " + "'" + tai_khoan_param + "'" ; 
+			}
+			if (ma_tien_te_param.equals("-1")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(TRCTYP) = " + "'" + ma_tien_te_param + "'" ; 
+			}
+			if (phong_ban_param.equals("-1")) {}
+			else
+			{	
+				    where_sql = where_sql + " and SEGMENT2 = '" + phong_ban_param + "'";
+			}	
+			
+			// Man hinh NHAP MOI THUYET MINH chi hien thi trang thai = null hoac 1-Cho duyet
+			//where_sql = where_sql + " and  nvl(trang_thai,'999') = 999 and phong_ban IS NOT NULL " ;
+ 			//04/2018
+			where_sql = where_sql + " and ( (nvl(trang_thai,'999') = 999 and phong_ban IS NOT NULL) or (trang_thai = '3' and duyet_bc = 'N') ) ";
+			
+			String sql = 
+					"Select " 
+				    + "TRBR as CHINHANH, " +
+				    "phong_ban as PHONGBAN, " +
+				    " ngay_bao_cao, "
+				    + "trusrn as USER_HACHTOAN, " +
+				    "trunc(DATADATE7) as NGAYGD, " +
+				    "TRSEQ as SO_CHUNG_TU , " +
+				    "GTACCT as SO_TAI_KHOAN, " +
+				    "SEGMENT2 as MaPhongban, SEGMENT5 as MaSanpham,SEGMENT4 as MaDVLQ,SEGMENT6 as MaKH," +
+				    " TRCTYP as MA_TIEN_TE, " +
+				    "TRDORC as NO_CO, " +
+				    "TRAMT as SO_TIEN, " +
+				    "TREFTH as NOI_DUNG," 
+					+ "THUYET_MINH, " +
+					"trang_thai, " +
+					"trunc(ngay_tat_toan) NGAY_TAT_TOAN " 
+					+ " ,duyet_BC, user_nhap, user_duyet, ID_DULIEU AUTO_ID "
+					+" from qltktg_glstrn " 
+				    + where_sql +     
+				    " Order by TRBR, phong_ban, DATADATE7,trusrn, GTACCT, TRCTYP" ;
+				   
+				return sql;							
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Xuat Excel - Day duyet Minh:" + ex.getMessage());
+			return "";
+		}		
+	}	
+	
+	public String NhapExcel(ArrayList<NhapThuyetMinhDTO> arr, String UserName) 
+	{
+//		Connection conn = null;
+//		PreparedStatement pst = null;
+//		try 
+//		{			
+//			NhapThuyetMinhDTO dto;
+//			CallableStatement st = null;
+//			String result = "";	
+//			ResultSet rs = null;
+//
+//			//conn = DB.getConnection();
+//			conn = DB.getConnection().getDataSource().getConnection();
+//			String Sql = 
+//					"UPDATE  qltktg_glstrn " 
+//					+ " SET TRAMT=?, thuyet_minh=?, phong_ban=?, user_nhap=?" 
+//					+ " where id_dulieu = ? and (trang_thai = '3' or  nvl(trang_thai,'999') = 999 or trang_thai = '1')";
+//			
+//			pst = conn.prepareStatement(Sql);
+//			for (int i = 0; i < arr.size(); i++) 
+//			{			
+//			    dto = arr.get(i);				
+//				pst.setString(1, dto.getTRAMT());
+//				pst.setString(2, dto.getTHUYET_MINH());
+//				pst.setString(3, dto.getPHONGBAN());
+//				pst.setString(4, dto.getUSERNHAP());								
+//				pst.setString(5, dto.getAUTO_ID());							
+//				pst.addBatch();
+//			}
+//			
+//			pst.executeBatch();
+//			LogsImpl.WriteLogs_QLTKTG(UserName, "", "", "12", ""); //logs
+//			conn.commit();
+//			
+//			if(conn!=null) conn.rollback();
+//			conn.close();
+//					
+//			return "success";	
+//			
+//		} 	
+//		catch (Exception ex) 
+//		{		
+//			//ex.printStackTrace();			
+//			return Constants.RETURN_FAIL + ex.getMessage();  
+//		} 
+//		
+		try (Connection conn = DB.getConnection().getDataSource().getConnection();
+			     PreparedStatement pst = conn.prepareStatement(
+			             "UPDATE  qltktg_glstrn "
+			             + " SET TRAMT=?, thuyet_minh=?, phong_ban=?, user_nhap=?"
+			             + " where id_dulieu = ? and (trang_thai = '3' or  nvl(trang_thai,'999') = 999 or trang_thai = '1')")) {
+
+			    NhapThuyetMinhDTO dto;
+
+			    for (int i = 0; i < arr.size(); i++) {
+			        dto = arr.get(i);
+			        pst.setString(1, dto.getTRAMT());
+			        pst.setString(2, dto.getTHUYET_MINH());
+			        pst.setString(3, dto.getPHONGBAN());
+			        pst.setString(4, dto.getUSERNHAP());
+			        pst.setString(5, dto.getAUTO_ID());
+			        pst.addBatch();
+			    }
+
+			    pst.executeBatch();
+			    LogsImpl.WriteLogs_QLTKTG(UserName, "", "", "12", ""); //logs
+			    conn.commit();
+
+			    return "success";
+
+			} catch (SQLException ex) {
+			    return Constants.RETURN_FAIL + ex.getMessage();
+			} catch (Exception ex) {
+			    return Constants.RETURN_FAIL + ex.getMessage();
+			} finally {
+			   
+			}
+	}
+	
+	public String stripNonValidXMLCharacters(String in) {
+        StringBuffer out = new StringBuffer(); // Used to hold the output.
+        char current; // Used to reference the current character.
+
+        if (in == null || ("".equals(in))) return ""; // vacancy test.
+        for (int i = 0; i < in.length(); i++) {
+            current = in.charAt(i); // NOTE: No IndexOutOfBoundsException caught here; it should not happen.
+            if ((current == 0x9) ||
+                (current == 0xA) ||
+                (current == 0xD) ||
+                ((current >= 0x20) && (current <= 0xD7FF)) ||
+                ((current >= 0xE000) && (current <= 0xFFFD)) ||
+                ((current >= 0x10000) && (current <= 0x10FFFF)))
+                out.append(current);
+        }
+        return out.toString();
+    }
+	
+}
+;
+package com.bidv.ftp.jdbc;
+
+import java.io.*;
+import java.util.Date;
+import java.text.*;
+import java.util.Calendar;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat; 
+import java.text.DecimalFormat;
+import java.sql.CallableStatement;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Types;
+import java.util.Random;
+import java.util.Vector;
+ 
+
+import com.bidv.ftp.resource.DB;
+import com.bidv.ftp.util.Constants;
+import com.bidv.ftp.util.Utils;
+
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.SqlOutParameter;
+import org.springframework.jdbc.core.SqlParameter;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.sql.DataSource;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import org.springframework.jdbc.object.StoredProcedure;
+import org.springframework.jdbc.support.rowset.SqlRowSet;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+
+import com.bidv.ftp.dao.PheDuyetDAO;
+import com.bidv.ftp.dto.PheDuyetDTO;
+import com.bidv.ftp.dto.GetDTO;
+
+public class PheDuyetImpl implements PheDuyetDAO
+{
+
+	
+	
+	public String TimKiem(GetDTO getDTO, String WhereConditon)
+	{
+		try
+		{
+			String ngay_giao_dich = Utils.getTag(WhereConditon,"<DATE>","</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereConditon,"<CHINHANH>","</CHINHANH>");			
+			String user_param = Utils.getTag(WhereConditon,"<USER>","</USER>");
+			String so_chung_tu_param = Utils.getTag(WhereConditon,"<SOCHUNGTU>","</SOCHUNGTU>");			
+			String tai_khoan_param = Utils.getTag(WhereConditon,"<TAIKHOAN>","</TAIKHOAN>");
+			String ma_tien_te_param = Utils.getTag(WhereConditon,"<MATIENTE>","</MATIENTE>");			
+			String trang_thai_param = Utils.getTag(WhereConditon,"<TRANGTHAI>","</TRANGTHAI>");
+			String phong_ban_param = Utils.getTag(WhereConditon,"<PHONGBAN>","</PHONGBAN>");
+			
+			// Check null o JSP			
+			String where_sql = "";
+			where_sql = "where ngay_bao_cao = to_date(" +"'" + ngay_giao_dich + "','dd/mm/yyyy')" ;			
+			where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+			if (user_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trusrn) = " + "'" + user_param + "'"; 
+			}
+			if (so_chung_tu_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trseq) = " + "'" + so_chung_tu_param + "'" ; 
+			}
+			if (tai_khoan_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(GTACCT) = " + "'" + tai_khoan_param + "'" ; 
+			}
+			if (ma_tien_te_param.equals("-1")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(TRCTYP) = " + "'" + ma_tien_te_param + "'" ; 
+			}
+			if (trang_thai_param.equals("-1")) 
+			{
+				where_sql = where_sql + " and trang_thai in (1,2,3) ";
+			}
+			else
+			{	
+				where_sql = where_sql + " and trang_thai like '" + trang_thai_param + "%'";
+			}
+			if (phong_ban_param.equals("-1")) {}
+			else
+			{	
+				    where_sql = where_sql + " and SEGMENT2 = '" + phong_ban_param + "'";
+			}	//phong_ban
+			
+			int ipage = Integer.parseInt(getDTO.getPage());
+			int ilimit = Integer.parseInt(getDTO.getLimit());
+			String Start =  String.valueOf((ipage-1)*ilimit + 1);
+			String End = String.valueOf(ipage*ilimit);		
+			int count = 0;
+			SqlRowSet rs ;
+			int iTotalPage;			
+			if (getDTO.getSidx().equals("STT"))	getDTO.setSidx("STT");
+			String count_sql = "select count(*) from qltktg_glstrn " + where_sql;	
+			
+			count = DB.jdbcTemplate.queryForInt(count_sql);
+			iTotalPage = count/ilimit;
+			int acCount = iTotalPage * ilimit;
+			if (acCount<count) iTotalPage++ ;			
+			String where = " where STT between " + Start + " and " + End;	
+			
+			String sql = 
+				"select * from" 			   
+				+" (select rownum as STT," 
+				+ "TRBR, phong_ban, to_char(ngay_bao_cao, 'dd/mm/yyyy') ngay_bao_cao, "		
+				+ "TRUSRN, to_char(DATADATE7, 'dd/mm/yyyy') DATADATE7,TRSEQ,GTACCT,SEGMENT2, SEGMENT4,SEGMENT5,SEGMENT6,TRCTYP,TRDORC,TRAMT,TREFTH,ZCHANREFNO,TRREFN,thuyet_minh,trang_thai,to_char(ngay_tat_toan, 'dd/mm/yyyy') ngay_tat_toan,id_dulieu, duyet_bc, user_nhap, user_duyet " 
+				+" from qltktg_glstrn " 
+			    + where_sql + 
+			    " Order by phong_ban, TRUSRN, trang_thai )" 		    
+			    + where + " Order by STT";			
+			
+			rs = DB.jdbcTemplate.queryForRowSet(sql);
+					
+			StringBuilder sb = new StringBuilder();
+			while (rs.next()) 
+			{
+         		String TRBR = Utils.toHTML(rs.getString("TRBR"));
+				String phong_ban = Utils.toHTML(rs.getString("phong_ban"));
+				String ngay_bao_cao = Utils.toHTML(rs.getString("ngay_bao_cao"));						
+				String TRUSRN = Utils.toHTML(rs.getString("TRUSRN"));				
+				String DATADATE7 = Utils.toHTML(rs.getString("DATADATE7"));										
+				String TRSEQ = Utils.toHTML(rs.getString("TRSEQ"));	
+				String GTACCT = Utils.toHTML(rs.getString("GTACCT"));
+				String SEGMENT2 = Utils.toHTML(rs.getString("SEGMENT2"));
+				String SEGMENT4 = Utils.toHTML(rs.getString("SEGMENT4"));
+				String SEGMENT5 = Utils.toHTML(rs.getString("SEGMENT5"));
+				String SEGMENT6 = Utils.toHTML(rs.getString("SEGMENT6"));
+				String TRCTYP = Utils.toHTML(rs.getString("TRCTYP"));
+				String TRDORC = Utils.toHTML(rs.getString("TRDORC"));
+				String TRAMT = Utils.toHTML(rs.getString("TRAMT"));
+				//
+				String TREFTH = Utils.toHTML( Utils.checkNull(rs.getString("TREFTH")) );	
+				TREFTH = stripNonValidXMLCharacters(TREFTH);
+				//
+				String ZCHANREFNO = Utils.toHTML(rs.getString("ZCHANREFNO"));
+				String TRREFN = Utils.toHTML(rs.getString("TRREFN"));
+				String thuyet_minh = Utils.toHTML(rs.getString("thuyet_minh"));
+				String trang_thai = Utils.toHTML(rs.getString("trang_thai"));
+				if (trang_thai.equals("1") )
+				{
+					trang_thai = "1-Cho duyet";
+				}	
+				if (trang_thai.equals("2") )
+				{
+					trang_thai = "2-Da duyet";
+				}	
+				if (trang_thai.equals("3") )
+				{
+					trang_thai = "3-Da xu ly";
+				}
+				String ngay_tat_toan = Utils.toHTML(rs.getString("ngay_tat_toan"));
+				String id_dulieu = Utils.toHTML(rs.getString("id_dulieu"));
+				String duyet_bc = Utils.toHTML(rs.getString("duyet_bc"));
+				String user_nhap = Utils.toHTML(rs.getString("user_nhap"));
+				String user_duyet = Utils.toHTML(rs.getString("user_duyet"));
+				
+			
+				sb.append("<row><cell>");	
+				sb.append(TRBR);
+				sb.append("</cell><cell>");
+				sb.append(phong_ban);
+				sb.append("</cell><cell>");
+				sb.append(ngay_bao_cao);
+				sb.append("</cell><cell>");		
+				sb.append(TRUSRN);
+				sb.append("</cell><cell>");
+				sb.append(DATADATE7);
+				sb.append("</cell><cell>");
+				sb.append(TRSEQ);
+				sb.append("</cell><cell>");
+				sb.append(GTACCT);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT2);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT4);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT5);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT6);
+				sb.append("</cell><cell>");
+				sb.append(TRCTYP);
+				sb.append("</cell><cell>");
+				sb.append(TRDORC);
+				sb.append("</cell><cell>");
+				sb.append(TRAMT);
+				sb.append("</cell><cell>");
+				sb.append(TREFTH);
+				sb.append("</cell><cell>");
+				sb.append(ZCHANREFNO);
+				sb.append("</cell><cell>");
+				sb.append(TRREFN);
+				sb.append("</cell><cell>");
+				sb.append(thuyet_minh);
+				sb.append("</cell><cell>");
+				sb.append(trang_thai);
+				sb.append("</cell><cell>");
+				sb.append(ngay_tat_toan);
+				sb.append("</cell><cell>");
+				sb.append(id_dulieu);
+				sb.append("</cell><cell>");
+				sb.append(duyet_bc);
+				sb.append("</cell><cell>");
+				sb.append(user_nhap);
+				sb.append("</cell><cell>");
+				sb.append(user_duyet);
+				sb.append("</cell></row>");
+				
+			}		
+			return "<rows><page>"+getDTO.getPage()+"</page><total>"+String.valueOf(iTotalPage)+"</total><records>"+String.valueOf(count)+"</records>"+sb.toString()+"</rows>";			
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Phe duyet:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}		
+	}
+		
+	public String edit_nhieu_banghi(String id_dulieu, String so_tien, String thuyet_minh, 
+									String ma_phong_ban, String UserName, String UserBranch,
+									String ipAddress)
+	{
+		//String id = id_dulieu;	
+		//id = id.substring(1);
+
+		String sql_update = "";
+		
+		// So tien khac NULL - check tren JSP
+		sql_update = sql_update + " SET TRAMT = " + so_tien ;
+		
+		// thuyet minh
+		// truong hop user xoa thuyet minh thi thuyet minh = ""
+		sql_update = sql_update + " ,THUYET_MINH = " + "'" + thuyet_minh + "'";
+		
+		// Ma phong ban khac NULL - check tren JSP
+		sql_update = sql_update + " ,PHONG_BAN = " + "'" + ma_phong_ban + "'";
+				
+		try 
+		{
+					String sql = 
+						"update qltktg_glstrn" 
+					    + sql_update
+                        + " WHERE ID_DULIEU IN (" + id_dulieu + ")";
+                       
+						int res;
+						res = DB.jdbcTemplate.update(sql);		
+											
+				    
+						sql = sql.replace("'", "''");												
+						LogsImpl.WriteLogs_QLTKTG(UserName, ipAddress, UserBranch, "7", sql);	
+						
+					return "success";										
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Phe duyet - Sua GD:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+		
+		
+	}
+			
+	public String phe_duyet_nhieu_gd(String id_dulieu, String ngay, String UserName, String UserBranch, String ipAddress)
+	{
+		DateFormat dateFormat = new SimpleDateFormat("yyyyMMddHHmmss");
+	    Date date = new Date();
+	    
+	    Random rn = new Random();
+        int range = 1000;
+        int randomNum = 1 + rn.nextInt(range);
+       	    
+	    String key_param = String.valueOf(dateFormat.format(date)) + String.valueOf(randomNum);
+			
+		String id = id_dulieu;	
+		id = id.substring(1);
+		id = "(" + id + ")";		
+		try 
+		{		
+			// Call Store		
+			Connection conn = null;
+			//CallableStatement st = null;						
+			//conn = DB.getConnection();
+			conn = DB.getConnection().getDataSource().getConnection();
+			try(CallableStatement st = conn.prepareCall("{call PHE_DUYET(?,?,?,?)}")){
+				st.setString(1, id);	 
+				st.setString(2, ngay);
+				st.setString(3, UserName);
+				st.setString(4, key_param);
+				st.execute();
+						
+				LogsImpl.WriteLogs_QLTKTG(UserName, ipAddress, UserBranch, "6", "Phe duyet ID du lieu:" + id);
+			}
+			return "success";
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Phe duyet:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}	
+	}
+		
+	public String huy_duyet_nhieu_gd(String id_dulieu,String UserName, String UserBranch, String ipAddress)
+	{
+		String id = id_dulieu;	
+		id = id.substring(1);
+		id = "(" + id + ")";		
+		try 
+		{
+			// Call Store
+			Connection conn = null;
+			//CallableStatement st = null;						
+			//conn = DB.getConnection();
+			conn = DB.getConnection().getDataSource().getConnection();
+			try(CallableStatement st = conn.prepareCall("{call HUY_DUYET(?)}")){
+				st.setString("id_dulieu", id);								    
+				st.execute();
+				
+				LogsImpl.WriteLogs_QLTKTG(UserName, ipAddress, UserBranch, "6", "Huy duyet ID du lieu:" + id);
+			}				
+			return "success";									
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Huy duyet:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}	
+	}
+	
+	public String stripNonValidXMLCharacters(String in) {
+        StringBuffer out = new StringBuffer(); // Used to hold the output.
+        char current; // Used to reference the current character.
+
+        if (in == null || ("".equals(in))) return ""; // vacancy test.
+        for (int i = 0; i < in.length(); i++) {
+            current = in.charAt(i); // NOTE: No IndexOutOfBoundsException caught here; it should not happen.
+            if ((current == 0x9) ||
+                (current == 0xA) ||
+                (current == 0xD) ||
+                ((current >= 0x20) && (current <= 0xD7FF)) ||
+                ((current >= 0xE000) && (current <= 0xFFFD)) ||
+                ((current >= 0x10000) && (current <= 0x10FFFF)))
+                out.append(current);
+        }
+        return out.toString();
+    }
+}
+;
+package com.bidv.ftp.jdbc;
+
+import java.io.*;
+import java.util.Date;
+import java.text.*;
+import java.util.Calendar;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat; 
+import java.text.DecimalFormat;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Types;
+ 
+import com.bidv.ftp.resource.DB;
+import com.bidv.ftp.util.Constants;
+import com.bidv.ftp.util.Utils;
+
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.SqlOutParameter;
+import org.springframework.jdbc.core.SqlParameter;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.sql.DataSource;
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import org.springframework.jdbc.object.StoredProcedure;
+import org.springframework.jdbc.support.rowset.SqlRowSet;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+
+import com.bidv.ftp.dao.SuaLoiDAO;
+import com.bidv.ftp.dto.SuaLoiDTO;
+import com.bidv.ftp.dto.GetDTO;
+
+public class SuaLoiImpl implements SuaLoiDAO
+{
+
+	public String TimKiem(GetDTO getDTO, String WhereConditon)
+	{
+		try
+		{
+			String ngay_giao_dich = Utils.getTag(WhereConditon,"<DATE>","</DATE>");
+			String chi_nhanh_param = Utils.getTag(WhereConditon,"<CHINHANH>","</CHINHANH>");	
+			String user_param = Utils.getTag(WhereConditon,"<USER>","</USER>");
+			String so_chung_tu_param = Utils.getTag(WhereConditon,"<SOCHUNGTU>","</SOCHUNGTU>");		
+			String tai_khoan_param = Utils.getTag(WhereConditon,"<TAIKHOAN>","</TAIKHOAN>");
+			String ma_tien_te_param = Utils.getTag(WhereConditon,"<MATIENTE>","</MATIENTE>");
+			String phong_ban_param = Utils.getTag(WhereConditon,"<PHONGBAN>","</PHONGBAN>");
+			
+			// Ngay giao dich + CN
+			// Check null o JSP			
+			String where_sql = "";
+			where_sql = "where ngay_bao_cao = to_date(" +"'" + ngay_giao_dich + "','dd/mm/yyyy')" ;			
+			where_sql = where_sql + " and TRBR = '" + chi_nhanh_param + "'";
+			
+			// user
+			if (user_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trusrn) = " + "'" + user_param + "'"; 
+			}	
+			// so chung tu
+			if (so_chung_tu_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(trseq) = " + "'" + so_chung_tu_param + "'" ; 
+			}			
+			
+			// tai khoan
+			if (tai_khoan_param.equals("")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(GTACCT) = " + "'" + tai_khoan_param + "'" ; 
+			}
+			// ma tien te
+			if (ma_tien_te_param.equals("-1")) {}
+			else 
+			{ 
+				where_sql = where_sql + " and trim(TRCTYP) = " + "'" + ma_tien_te_param + "'" ; 
+			}
+			// trang thai
+			
+				where_sql = where_sql + " and trang_thai in (1) ";
+						
+			// phong ban
+			if (phong_ban_param.equals("-1")) {}
+			else
+			{	
+				    where_sql = where_sql + " and SEGMENT2 = '" + phong_ban_param + "'";
+			}	
+			
+			
+			
+			int ipage = Integer.parseInt(getDTO.getPage());
+			int ilimit = Integer.parseInt(getDTO.getLimit());
+			String Start =  String.valueOf((ipage-1)*ilimit + 1);
+			String End = String.valueOf(ipage*ilimit);		
+			int count = 0;
+			// mệnh đề where được dùng để phân trang.
+			SqlRowSet rs ;
+			int iTotalPage;			
+			if (getDTO.getSidx().equals("STT"))	getDTO.setSidx("STT");
+			String count_sql = "select count(*) from qltktg_glstrn " + where_sql;	
+			count = DB.jdbcTemplate.queryForInt(count_sql);
+			iTotalPage = count/ilimit;
+			int acCount = iTotalPage * ilimit;
+			if (acCount<count) iTotalPage++ ;
+			
+			String where = " where STT between " + Start + " and " + End;	
+			
+			String sql = 
+				"select * from" 
+					   
+				+" (select rownum as STT," 
+				+ "TRBR, phong_ban, to_char(ngay_bao_cao, 'dd/mm/yyyy') ngay_bao_cao, "
+				
+				+ "TRUSRN, to_char(DATADATE7, 'dd/mm/yyyy') DATADATE7,TRSEQ,GTACCT,SEGMENT2, SEGMENT4,SEGMENT5,SEGMENT6,TRCTYP,TRDORC,TRAMT,TREFTH,ZCHANREFNO,TRREFN,thuyet_minh,trang_thai,to_char(ngay_tat_toan, 'dd/mm/yyyy') ngay_tat_toan,id_dulieu, duyet_bc, user_nhap, user_duyet " 
+				+" from qltktg_glstrn " 
+			    + where_sql + 
+			    " Order by phong_ban, TRUSRN, trang_thai )" 
+			    
+			    + where + " Order by STT";			
+			
+			rs = DB.jdbcTemplate.queryForRowSet(sql);
+					
+			StringBuilder sb = new StringBuilder();
+
+			while (rs.next()) 
+			{
+         		String TRBR = Utils.toHTML(rs.getString("TRBR"));
+				String phong_ban = Utils.toHTML(rs.getString("phong_ban"));
+				String ngay_bao_cao = Utils.toHTML(rs.getString("ngay_bao_cao"));			
+				String TRUSRN = Utils.toHTML(rs.getString("TRUSRN"));
+				String DATADATE7 = Utils.toHTML(rs.getString("DATADATE7"));									
+				String TRSEQ = Utils.toHTML(rs.getString("TRSEQ"));	
+				String GTACCT = Utils.toHTML(rs.getString("GTACCT"));
+				String SEGMENT2 = Utils.toHTML(rs.getString("SEGMENT2"));
+				String SEGMENT4 = Utils.toHTML(rs.getString("SEGMENT4"));
+				String SEGMENT5 = Utils.toHTML(rs.getString("SEGMENT5"));
+				String SEGMENT6 = Utils.toHTML(rs.getString("SEGMENT6"));
+				String TRCTYP = Utils.toHTML(rs.getString("TRCTYP"));
+				String TRDORC = Utils.toHTML(rs.getString("TRDORC"));
+				String TRAMT = Utils.toHTML(rs.getString("TRAMT"));
+				//
+				String TREFTH = Utils.toHTML( Utils.checkNull(rs.getString("TREFTH")) );	
+				TREFTH = stripNonValidXMLCharacters(TREFTH);
+				//
+				String ZCHANREFNO = Utils.toHTML(rs.getString("ZCHANREFNO"));
+				String TRREFN = Utils.toHTML(rs.getString("TRREFN"));
+				String thuyet_minh = Utils.toHTML(rs.getString("thuyet_minh"));
+				String trang_thai = Utils.toHTML(rs.getString("trang_thai"));
+				if (trang_thai.equals("1") )
+				{
+					trang_thai = "1-Cho duyet";
+				}	
+				if (trang_thai.equals("2") )
+				{
+					trang_thai = "2-Da duyet";
+				}	
+				if (trang_thai.equals("3") )
+				{
+					trang_thai = "3-Da xu ly";
+				}			
+				String ngay_tat_toan = Utils.toHTML(rs.getString("ngay_tat_toan"));
+				String id_dulieu = Utils.toHTML(rs.getString("id_dulieu"));
+				String duyet_bc = Utils.toHTML(rs.getString("duyet_bc"));
+				String user_nhap = Utils.toHTML(rs.getString("user_nhap"));
+				String user_duyet = Utils.toHTML(rs.getString("user_duyet"));
+				
+				sb.append("<row><cell>");	
+				sb.append(TRBR);
+				sb.append("</cell><cell>");
+				sb.append(phong_ban);
+				sb.append("</cell><cell>");
+				sb.append(ngay_bao_cao);
+				sb.append("</cell><cell>");		
+				sb.append(TRUSRN);
+				sb.append("</cell><cell>");
+				sb.append(DATADATE7);
+				sb.append("</cell><cell>");
+				sb.append(TRSEQ);
+				sb.append("</cell><cell>");
+				sb.append(GTACCT);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT2);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT4);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT5);
+				sb.append("</cell><cell>");
+				sb.append(SEGMENT6);
+				sb.append("</cell><cell>");
+				sb.append(TRCTYP);
+				sb.append("</cell><cell>");
+				sb.append(TRDORC);
+				sb.append("</cell><cell>");
+				sb.append(TRAMT);
+				sb.append("</cell><cell>");
+				sb.append(TREFTH);
+				sb.append("</cell><cell>");
+				sb.append(ZCHANREFNO);
+				sb.append("</cell><cell>");
+				sb.append(TRREFN);
+				sb.append("</cell><cell>");
+				sb.append(thuyet_minh);
+				sb.append("</cell><cell>");
+				sb.append(trang_thai);
+				sb.append("</cell><cell>");
+				sb.append(ngay_tat_toan);
+				sb.append("</cell><cell>");
+				sb.append(id_dulieu);
+				sb.append("</cell><cell>");
+				sb.append(duyet_bc);
+				sb.append("</cell><cell>");
+				sb.append(user_nhap);
+				sb.append("</cell><cell>");
+				sb.append(user_duyet);
+				sb.append("</cell></row>");					
+			}
+			
+			return "<rows><page>"+getDTO.getPage()+"</page><total>"+String.valueOf(iTotalPage)+"</total><records>"+String.valueOf(count)+"</records>"+sb.toString()+"</rows>";			
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Sua loi:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}		
+	}
+		
+	public String sua_loi(String id_dulieu, String UserName, String UserBranch, String ipAddress)
+	{
+		//String id = id_dulieu;	
+		//id = id.substring(1);
+		try 
+		{
+				
+					String sql = 
+						"update qltktg_glstrn" 
+					    +" SET TRANG_THAI=3"                        
+                        + " WHERE ID_DULIEU IN (" + id_dulieu + ")";
+					
+						int res;
+						res = DB.jdbcTemplate.update(sql);
+						
+						sql = sql.replace("'", "''");												
+						LogsImpl.WriteLogs_QLTKTG(UserName, ipAddress, UserBranch, "8", sql);
+						
+						return "success";	
+		}
+		catch (Exception ex)
+		{
+			System.out.println("Error - Sua loi:" + ex.getMessage());
+			return "Error: " + ex.getMessage();
+		}
+				
+		
+	}
+	
+	public String stripNonValidXMLCharacters(String in) {
+        StringBuffer out = new StringBuffer(); // Used to hold the output.
+        char current; // Used to reference the current character.
+
+        if (in == null || ("".equals(in))) return ""; // vacancy test.
+        for (int i = 0; i < in.length(); i++) {
+            current = in.charAt(i); // NOTE: No IndexOutOfBoundsException caught here; it should not happen.
+            if ((current == 0x9) ||
+                (current == 0xA) ||
+                (current == 0xD) ||
+                ((current >= 0x20) && (current <= 0xD7FF)) ||
+                ((current >= 0xE000) && (current <= 0xFFFD)) ||
+                ((current >= 0x10000) && (current <= 0x10FFFF)))
+                out.append(current);
+        }
+        return out.toString();
+    }
+}
